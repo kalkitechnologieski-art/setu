@@ -10,7 +10,7 @@ const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL &&
   process.env.NEXT_PUBLIC_APP_URL !== "__SET_ME__"
     ? process.env.NEXT_PUBLIC_APP_URL
-    : "https://setu-kalki.vercel.app";
+    : "https://setu-kalki.netlify.app";
 
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
@@ -21,10 +21,13 @@ export const metadata: Metadata = {
   description:
     "Four autonomous AI employees — lead discovery, voice outreach, nurture sequences, and performance marketing — operating in parallel from one control plane.",
   applicationName: "Setu Kalki",
-  authors: [{ name: "Setu Kalki Intelligence" }],
   keywords: [
-    "AI marketing", "AI sales development", "AI SDR",
-    "performance marketing automation", "voice AI", "lead generation",
+    "AI marketing",
+    "AI sales development",
+    "AI SDR",
+    "performance marketing automation",
+    "voice AI",
+    "lead generation",
   ],
   openGraph: {
     type: "website",
@@ -40,14 +43,7 @@ export const metadata: Metadata = {
     description:
       "Four autonomous AI employees running your revenue motions in parallel.",
   },
-  icons: {
-    icon: "/favicon.ico",
-    apple: "/favicon.ico",
-  },
-  robots: {
-    index: true,
-    follow: true,
-  },
+  robots: { index: true, follow: true },
 };
 
 export const viewport: Viewport = {
@@ -60,19 +56,21 @@ export const viewport: Viewport = {
   maximumScale: 5,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="en" suppressHydrationWarning className={inter.variable}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={inter.variable}
+      style={{ colorScheme: "light" }}
+    >
       <body className="font-sans antialiased">
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          {children}
-          <Toaster richColors position="top-right" />
-        </ThemeProvider>
+        <ThemeProvider>{children}</ThemeProvider>
+        <Toaster richColors position="top-right" />
       </body>
     </html>
   );

@@ -3,33 +3,64 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./types";
 
+/**
+ * Routes that require an authenticated session.
+ */
 const PROTECTED_PREFIXES = [
   "/dashboard", "/inbox", "/workforce", "/leads", "/campaigns",
   "/performance", "/signals", "/calls", "/analytics", "/workflows",
-  "/approvals", "/settings", "/connect",
+  "/approvals", "/settings", "/connect", "/ops",
 ];
 
-const AUTH_ONLY_PATHS = ["/login", "/signup", "/magic-link", "/forgot-password"];
-
 /**
- * Refresh the auth session on every request.
+ * Routes that must never require auth — static assets, auth pages, and
+ * metadata files. Without these, the browser's manifest fetch, sitemap
+ * crawler, and favicon request all fail with 401 because middleware
+ * intercepts them before Next.js can serve the response.
  *
- * This is the ONLY job of the middleware. It:
- *   1. Calls supabase.auth.getUser() — which triggers a token refresh if
- *      the access token has expired. Without this, sessions silently expire
- *      after 1 hour and users get signed out mid-task.
- *   2. Writes the refreshed cookies back to the request (for Server
- *      Components) and to the response (for the browser).
- *   3. Redirects unauthenticated users away from protected routes.
- *   4. Redirects authenticated users away from login/signup.
+ * This is the PWA manifest fix documented in the Next.js middleware
+ * pattern — PUBLIC_PATHS still applies CSP headers, but skips the auth
+ * redirect.
  */
+const PUBLIC_PATHS = new Set([
+  "/",
+  "/login",
+  "/signup",
+  "/callback",
+  "/onboarding",
+  "/forgot-password",
+  "/reset-password",
+  "/manifest.webmanifest",
+  "/robots.txt",
+  "/sitemap.xml",
+  "/favicon.ico",
+  "/icon.svg",
+  "/icon.png",
+  "/apple-icon.png",
+  "/apple-icon.svg",
+  "/opengraph-image",
+  "/twitter-image",
+]);
+
+const AUTH_ONLY_PATHS = new Set([
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+]);
+
+function isPublicPath(pathname: string): boolean {
+  if (PUBLIC_PATHS.has(pathname)) return true;
+  // Match any path whose last segment is a static file extension
+  return /\.(?:ico|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|eot|webmanifest|txt|xml)$/i.test(pathname);
+}
+
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-  // If keys are missing, pass through unchanged (dev with placeholders).
   if (!url || !key || key === "__SET_ME__") {
     return response;
   }
@@ -40,13 +71,10 @@ export async function updateSession(request: NextRequest) {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet) {
-        // Write to request cookies so Server Components see the fresh token
         cookiesToSet.forEach(({ name, value }) =>
           request.cookies.set(name, value)
         );
-        // Rebuild response with updated request
         response = NextResponse.next({ request });
-        // Write to response cookies so the browser stores them
         cookiesToSet.forEach(({ name, value, options }) =>
           response.cookies.set(name, value, {
             ...options,
@@ -61,28 +89,29 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // CRITICAL: getUser() verifies the JWT and refreshes if expired.
-  // Never use getSession() on the server — it does not verify the signature.
   const { data: { user } } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isProtected = PROTECTED_PREFIXES.some((p) => path.startsWith(p));
-  const isAuthOnly = AUTH_ONLY_PATHS.some((p) => path.startsWith(p));
 
-  // Authenticated user trying to access login/signup → redirect to dashboard
-  if (user && isAuthOnly) {
-    const url2 = request.nextUrl.clone();
-    url2.pathname = "/dashboard";
-    url2.search = "";
-    return NextResponse.redirect(url2);
+  // Never redirect static assets or metadata files.
+  if (isPublicPath(path)) {
+    // If already signed in and hitting an auth-only page, redirect to dashboard
+    if (user && AUTH_ONLY_PATHS.has(path)) {
+      const redirect = request.nextUrl.clone();
+      redirect.pathname = "/dashboard";
+      redirect.search = "";
+      return NextResponse.redirect(redirect);
+    }
+    return response;
   }
 
-  // Unauthenticated user trying to access protected route → login
+  const isProtected = PROTECTED_PREFIXES.some((p) => path.startsWith(p));
+
   if (!user && isProtected) {
-    const url2 = request.nextUrl.clone();
-    url2.pathname = "/login";
-    url2.searchParams.set("next", path);
-    return NextResponse.redirect(url2);
+    const redirect = request.nextUrl.clone();
+    redirect.pathname = "/login";
+    redirect.searchParams.set("next", path);
+    return NextResponse.redirect(redirect);
   }
 
   return response;
