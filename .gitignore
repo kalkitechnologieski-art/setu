@@ -39,3 +39,21 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Phase II — never commit secrets
+.env
+
+# Phase II — never commit secrets
+.env.local
+
+# Phase II — never commit secrets
+.env.*.local
+
+# Phase II — never commit secrets
+phase2.env
+
+# Phase II — never commit secrets
+phase2.env.local
+
+# Phase II — never commit secrets
+*.local
