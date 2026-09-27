@@ -1,5 +1,6 @@
 // lib/siddhi/router.ts
-// LLM router with tool-calling: Groq → Agnes → OpenRouter.
+// Tool-calling LLM router. Same fail-fast, key-presence-aware semantics as
+// lib/llm/router.ts. Only providers with keys set are tried.
 import type {
   SiddhiMessage,
   SiddhiProviderResult,
@@ -9,10 +10,7 @@ import { toolsForLLM } from "./tools";
 
 interface OpenAIChatResponse {
   choices?: Array<{
-    message?: {
-      content?: string | null;
-      tool_calls?: SiddhiToolCall[];
-    };
+    message?: { content?: string | null; tool_calls?: SiddhiToolCall[] };
   }>;
 }
 
@@ -34,7 +32,7 @@ const PROVIDERS: ProviderConfig[] = [
   },
   {
     name: "agnes",
-    url: process.env.AGNES_API_URL ?? "https://api.agnesai.com/v1/chat/completions",
+    url: process.env.AGNES_API_URL ?? "https://api.agnes-ai.cn/v1/chat/completions",
     model: process.env.AGNES_MODEL ?? "agnes-2.0-flash",
     keyEnv: "AGNES_API_KEY",
     supportsTools: true,
@@ -48,15 +46,24 @@ const PROVIDERS: ProviderConfig[] = [
   },
 ];
 
+function hasKey(name: string): boolean {
+  const v = process.env[name];
+  return Boolean(v && v !== "__SET_ME__" && v.trim() !== "");
+}
+
+function origin(): string {
+  const url = process.env.NEXT_PUBLIC_APP_URL;
+  if (url && url !== "__SET_ME__") return url.replace(/\/$/, "");
+  return "https://steady-croissant-9cbbbf.netlify.app";
+}
+
 async function callProvider(
   provider: ProviderConfig,
   messages: SiddhiMessage[],
   withTools: boolean
 ): Promise<SiddhiProviderResult> {
   const key = process.env[provider.keyEnv];
-  if (!key || key === "__SET_ME__") {
-    throw new Error(`missing key ${provider.keyEnv}`);
-  }
+  if (!key || key === "__SET_ME__") throw new Error(`missing_${provider.keyEnv}`);
 
   const body: Record<string, unknown> = {
     model: provider.model,
@@ -79,18 +86,26 @@ async function callProvider(
     body.tool_choice = "auto";
   }
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${key}`,
+    "Content-Type": "application/json",
+  };
+
+  // OpenRouter requires these for browser-origin requests
+  if (provider.name === "openrouter") {
+    headers["HTTP-Referer"] = origin();
+    headers["X-Title"] = "Setu Kalki";
+  }
+
   const res = await fetch(provider.url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`${provider.name} ${res.status}: ${text.slice(0, 200)}`);
+    throw new Error(`${provider.name}_${res.status}: ${text.slice(0, 200)}`);
   }
 
   const json = (await res.json()) as OpenAIChatResponse;
@@ -110,9 +125,17 @@ export async function callSiddhiLLM(
   messages: SiddhiMessage[],
   withTools = true
 ): Promise<SiddhiProviderResult> {
+  const available = PROVIDERS.filter((p) => hasKey(p.keyEnv));
+
+  if (available.length === 0) {
+    throw new Error(
+      "No LLM provider configured. Add GROQ_API_KEY, AGNES_API_KEY, or OPENROUTER_API_KEY to Netlify environment variables."
+    );
+  }
+
   let lastError: unknown = null;
 
-  for (const provider of PROVIDERS) {
+  for (const provider of available) {
     try {
       return await callProvider(provider, messages, withTools);
     } catch (e) {
@@ -122,7 +145,7 @@ export async function callSiddhiLLM(
   }
 
   throw new Error(
-    `All LLM providers failed. Last error: ${
+    `All configured LLM providers failed. Last error: ${
       lastError instanceof Error ? lastError.message : String(lastError)
     }`
   );

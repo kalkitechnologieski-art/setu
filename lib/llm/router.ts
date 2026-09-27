@@ -1,5 +1,13 @@
 // lib/llm/router.ts
-import { PROVIDER_CHAIN, PROVIDERS, type ProviderName } from "./providers";
+// ─────────────────────────────────────────────────────────────────────────
+// Multi-provider LLM router with fail-fast semantics.
+//
+// Providers are only tried if their API key is actually set. This prevents
+// the "All providers failed" error when one key is missing.
+//
+// OpenRouter requires HTTP-Referer and X-Title headers for browser-origin
+// requests — otherwise it returns 401 "Missing Authentication header".
+// ─────────────────────────────────────────────────────────────────────────
 
 export interface LLMMessage {
   role: "system" | "user" | "assistant";
@@ -8,7 +16,7 @@ export interface LLMMessage {
 
 export interface LLMResult {
   text: string;
-  provider: ProviderName;
+  provider: "groq" | "gemini" | "openrouter";
   model: string;
   duration_ms: number;
 }
@@ -17,66 +25,73 @@ export interface RouterOptions {
   messages: LLMMessage[];
   temperature?: number;
   maxTokens?: number;
-  preferredProvider?: ProviderName;
+  preferredProvider?: "groq" | "gemini" | "openrouter";
 }
 
-class ProviderError extends Error {
-  constructor(public provider: ProviderName, public status: number, message: string) {
-    super(`[${provider}] ${status}: ${message}`);
-    this.name = "ProviderError";
-  }
+// ─── Environment resolution (checked once at call time) ──────────────────
+
+function getKey(name: string): string | null {
+  const v = process.env[name];
+  if (!v || v === "__SET_ME__" || v.trim() === "") return null;
+  return v.trim();
 }
+
+const GROQ_KEY = () => getKey("GROQ_API_KEY");
+const GEMINI_KEY = () => getKey("GEMINI_API_KEY");
+const OPENROUTER_KEY = () => getKey("OPENROUTER_API_KEY");
+
+function origin(): string {
+  const url = process.env.NEXT_PUBLIC_APP_URL;
+  if (url && url !== "__SET_ME__") return url.replace(/\/$/, "");
+  return "https://steady-croissant-9cbbbf.netlify.app";
+}
+
+// ─── Provider callers ────────────────────────────────────────────────────
 
 async function callGroq(
   messages: LLMMessage[],
   temperature: number,
   maxTokens: number
-): Promise<string> {
-  const cfg = PROVIDERS.groq;
-  const key = process.env[cfg.envKey];
-  if (!key || key === "__SET_ME__") throw new ProviderError("groq", 0, "no key");
+): Promise<{ text: string; model: string }> {
+  const key = GROQ_KEY();
+  if (!key) throw new Error("missing_groq_key");
 
-  const res = await fetch(cfg.endpoint, {
+  const model = "llama-3.1-8b-instant";
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: cfg.model,
-      messages,
-      temperature,
-      max_tokens: maxTokens,
-    }),
+    body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new ProviderError("groq", res.status, body);
+    const body = await res.text().catch(() => "");
+    throw new Error(`groq_${res.status}: ${body.slice(0, 200)}`);
   }
 
   const json = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
-  return json.choices?.[0]?.message?.content ?? "";
+  return { text: json.choices?.[0]?.message?.content ?? "", model };
 }
 
 async function callGemini(
   messages: LLMMessage[],
   temperature: number,
   maxTokens: number
-): Promise<string> {
-  const cfg = PROVIDERS.gemini;
-  const key = process.env[cfg.envKey];
-  if (!key || key === "__SET_ME__") throw new ProviderError("gemini", 0, "no key");
+): Promise<{ text: string; model: string }> {
+  const key = GEMINI_KEY();
+  if (!key) throw new Error("missing_gemini_key");
 
+  const model = "gemini-2.5-flash-lite";
   const contents = messages
     .filter((m) => m.role !== "system")
     .map((m) => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content }],
     }));
-
   const systemInstruction = messages.find((m) => m.role === "system");
 
   const body: Record<string, unknown> = {
@@ -88,7 +103,7 @@ async function callGemini(
   }
 
   const res = await fetch(
-    `${cfg.endpoint}/${cfg.model}:generateContent?key=${key}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -97,91 +112,99 @@ async function callGemini(
   );
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new ProviderError("gemini", res.status, body);
+    const t = await res.text().catch(() => "");
+    throw new Error(`gemini_${res.status}: ${t.slice(0, 200)}`);
   }
 
   const json = (await res.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
-  return json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  return {
+    text: json.candidates?.[0]?.content?.parts?.[0]?.text ?? "",
+    model,
+  };
 }
 
 async function callOpenRouter(
   messages: LLMMessage[],
   temperature: number,
   maxTokens: number
-): Promise<string> {
-  const cfg = PROVIDERS.openrouter;
-  const key = process.env[cfg.envKey];
-  if (!key || key === "__SET_ME__") throw new ProviderError("openrouter", 0, "no key");
+): Promise<{ text: string; model: string }> {
+  const key = OPENROUTER_KEY();
+  if (!key) throw new Error("missing_openrouter_key");
 
-  const res = await fetch(cfg.endpoint, {
+  const model = "meta-llama/llama-3.1-8b-instruct:free";
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+      // REQUIRED for browser-origin requests — OpenRouter returns
+      // 401 "Missing Authentication header" without these.
+      "HTTP-Referer": origin(),
       "X-Title": "Setu Kalki",
     },
-    body: JSON.stringify({
-      model: cfg.model,
-      messages,
-      temperature,
-      max_tokens: maxTokens,
-    }),
+    body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new ProviderError("openrouter", res.status, body);
+    const body = await res.text().catch(() => "");
+    throw new Error(`openrouter_${res.status}: ${body.slice(0, 200)}`);
   }
 
   const json = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
-  return json.choices?.[0]?.message?.content ?? "";
+  return { text: json.choices?.[0]?.message?.content ?? "", model };
 }
 
-const CALLERS: Record<
-  ProviderName,
-  (m: LLMMessage[], t: number, k: number) => Promise<string>
-> = {
-  groq: callGroq,
-  gemini: callGemini,
-  openrouter: callOpenRouter,
-};
+// ─── Router ──────────────────────────────────────────────────────────────
 
 export async function routeLLM(opts: RouterOptions): Promise<LLMResult> {
   const temperature = opts.temperature ?? 0.7;
   const maxTokens = opts.maxTokens ?? 2048;
 
-  const chain = opts.preferredProvider
-    ? [opts.preferredProvider, ...PROVIDER_CHAIN.filter((p) => p !== opts.preferredProvider)]
-    : PROVIDER_CHAIN;
+  // Build the chain from providers whose keys are actually set.
+  const available: Array<"groq" | "gemini" | "openrouter"> = [];
+  if (GROQ_KEY()) available.push("groq");
+  if (GEMINI_KEY()) available.push("gemini");
+  if (OPENROUTER_KEY()) available.push("openrouter");
+
+  if (available.length === 0) {
+    throw new Error(
+      "No LLM provider configured. Add GROQ_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY."
+    );
+  }
+
+  // Prefer the requested provider if available, then the rest in order.
+  const chain = opts.preferredProvider && available.includes(opts.preferredProvider)
+    ? [opts.preferredProvider, ...available.filter((p) => p !== opts.preferredProvider)]
+    : available;
 
   let lastError: unknown = null;
 
   for (const provider of chain) {
     const start = Date.now();
     try {
-      const text = await CALLERS[provider](opts.messages, temperature, maxTokens);
+      let result: { text: string; model: string };
+      if (provider === "groq") result = await callGroq(opts.messages, temperature, maxTokens);
+      else if (provider === "gemini") result = await callGemini(opts.messages, temperature, maxTokens);
+      else result = await callOpenRouter(opts.messages, temperature, maxTokens);
+
       return {
-        text,
+        text: result.text,
         provider,
-        model: PROVIDERS[provider].model,
+        model: result.model,
         duration_ms: Date.now() - start,
       };
     } catch (e) {
       lastError = e;
-      const msg = e instanceof Error ? e.message : String(e);
-      console.warn(`[LLM Router] ${provider} failed: ${msg}`);
-      continue;
+      console.warn(`[LLM Router] ${provider} failed:`, e);
     }
   }
 
   throw new Error(
-    `All LLM providers failed. Last error: ${
+    `All configured LLM providers failed. Last error: ${
       lastError instanceof Error ? lastError.message : String(lastError)
     }`
   );

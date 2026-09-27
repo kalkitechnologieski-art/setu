@@ -1,77 +1,52 @@
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
+import { Inbox } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { getUnifiedInbox } from "@/lib/ops/queries";
 import { InboxItem, type InboxChannel } from "@/components/widgets/inbox-item";
-import { ApprovalCard } from "@/components/widgets/approval-card";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/premium/empty-state";
 
 export const dynamic = "force-dynamic";
 
-const MOCK_ITEMS: Array<{
-  channel: InboxChannel;
-  sender: string;
-  summary: string;
-  timestamp: string;
-  confidence?: number;
-}> = [
-  { channel: "approval", sender: "Meera", summary: "Approve outbound call to Aarav Sharma — ICP score 82, opened pricing 3×", timestamp: "2m", confidence: 0.87 },
-  { channel: "email",    sender: "Kabir", summary: "Drafted follow-up to Diya Patel — Q4 pricing question",           timestamp: "18m" },
-  { channel: "signal",   sender: "Arjun", summary: "Acme Industries raised Series B — matches your ICP exactly",       timestamp: "1h",  confidence: 0.94 },
-  { channel: "call",     sender: "Meera", summary: "Vihaan Reddy call completed — positive sentiment, asked for pricing", timestamp: "3h" },
-  { channel: "approval", sender: "Siddhi", summary: "Rebalance ₹18,400 from LinkedIn to TikTok — ROAS gap 2.9 → 5.1", timestamp: "5h", confidence: 0.79 },
-];
+const KIND_MAP: Record<string, InboxChannel> = {
+  approval: "approval", signal: "signal", call: "call",
+};
 
-export default function InboxPage() {
+export default async function InboxPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login?next=/inbox");
+
+  let items: Awaited<ReturnType<typeof getUnifiedInbox>> = [];
+  try { items = await getUnifiedInbox(user.id, 50); }
+  catch (e) { console.error("[inbox]", e); }
+
   return (
     <div className="space-y-5 animate-fade-up">
       <div>
-        <h1 className="text-2xl md:text-3xl font-semibold tracking-tight gradient-text">
-          Inbox
-        </h1>
+        <h1 className="text-2xl md:text-3xl font-semibold tracking-tight gradient-text">Inbox</h1>
         <p className="text-sm text-muted-foreground">
-          Every decision your workforce is waiting on, in one place.
+          {items.length === 0 ? "Every decision your workforce is waiting on, in one place." : `${items.length} item${items.length === 1 ? "" : "s"} waiting`}
         </p>
       </div>
-
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <Suspense fallback={<div className="h-96 rounded-2xl border bg-muted/30" />}>
-          <Card className="overflow-hidden">
-            <CardHeader className="border-b bg-muted/20">
-              <CardTitle className="text-base">Pending decisions ({MOCK_ITEMS.length})</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 p-3">
-              {MOCK_ITEMS.map((item, i) => (
+      {items.length === 0 ? (
+        <EmptyState icon={Inbox} title="All caught up" description="No pending decisions. Your AI team will surface items here when they need your input." />
+      ) : (
+        <div className="rounded-2xl border bg-card p-3">
+          <ul className="space-y-1.5">
+            {items.map((item) => (
+              <li key={item.id}>
                 <InboxItem
-                  key={i}
-                  channel={item.channel}
-                  sender={item.sender}
-                  summary={item.summary}
-                  timestamp={item.timestamp}
-                  confidence={item.confidence}
-                  active={i === 0}
+                  channel={KIND_MAP[item.kind] ?? "approval"}
+                  sender={item.agentSlug}
+                  summary={`${item.title} — ${item.subtitle}`}
+                  timestamp={new Date(item.timestamp).toLocaleString([], { hour: "2-digit", minute: "2-digit" })}
+                  confidence={item.confidence ?? undefined}
                 />
-              ))}
-            </CardContent>
-          </Card>
-        </Suspense>
-
-        <aside className="space-y-4">
-          <ApprovalCard
-            agentName="Meera"
-            action="Approve outbound call"
-            summary="Dial Aarav Sharma (+91-98xxx-xxxx). AI opener: reference Series B announcement."
-            reasoning="ICP score 82. Opened two emails in last 48h. Viewed pricing page three times. SDR notes match your Q4 enterprise playbook."
-            confidence={0.87}
-          />
-          <ApprovalCard
-            agentName="Siddhi"
-            action="Rebalance ₹18,400"
-            summary="Shift LinkedIn Ads budget to TikTok Ads for the next 7 days."
-            reasoning="LinkedIn ROAS 2.9 vs TikTok ROAS 5.1 over trailing 30d. Confidence from 14-day rolling window."
-            confidence={0.79}
-            accent="from-amber-500 to-orange-500"
-          />
-        </aside>
-      </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
-

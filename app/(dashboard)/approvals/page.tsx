@@ -1,35 +1,52 @@
-import { Suspense } from "react";
+import { redirect } from "next/navigation";
+import { CheckCircle2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
 import { ApprovalCard } from "@/components/widgets/approval-card";
+import { EmptyState } from "@/components/ui/premium/empty-state";
 
 export const dynamic = "force-dynamic";
 
-const APPROVALS = [
-  { agentName: "Meera",  action: "Place call to Aarav Sharma",    summary: "Outbound dial with AI opener referencing Series B.", confidence: 0.87, accent: "from-blue-500 to-cyan-500" },
-  { agentName: "Meera",  action: "Send SMS to Diya Patel",        summary: "Follow-up SMS with calendar link.",                  confidence: 0.81, accent: "from-blue-500 to-cyan-500" },
-  { agentName: "Siddhi", action: "Rebalance ₹18,400 budget",      summary: "Shift LinkedIn → TikTok for 7 days.",                confidence: 0.79, accent: "from-amber-500 to-orange-500" },
-  { agentName: "Kabir",  action: "Launch sequence step 2",         summary: "Follow-up email to 42 cold leads.",                  confidence: 0.92, accent: "from-emerald-500 to-teal-500" },
-];
+interface ApprovalRow {
+  id: string; agent_name: string; action: string;
+  reasoning: string | null; confidence: number | null;
+}
 
-export default function ApprovalsPage() {
+export default async function ApprovalsPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login?next=/approvals");
+
+  let approvals: ApprovalRow[] = [];
+  try {
+    const { data } = await supabase
+      .from("approvals")
+      .select("id, agent_name, action, reasoning, confidence")
+      .eq("user_id", user.id)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(50);
+    approvals = (data ?? []) as ApprovalRow[];
+  } catch (e) { console.error("[approvals]", e); }
+
   return (
     <div className="space-y-5 animate-fade-up">
       <div>
-        <h1 className="text-2xl md:text-3xl font-semibold tracking-tight gradient-text">
-          Approvals
-        </h1>
+        <h1 className="text-2xl md:text-3xl font-semibold tracking-tight gradient-text">Approvals</h1>
         <p className="text-sm text-muted-foreground">
-          Human-in-the-loop queue. Nothing writes without your sign-off.
+          {approvals.length === 0 ? "Nothing waiting." : `${approvals.length} decision${approvals.length === 1 ? "" : "s"} need your sign-off.`}
         </p>
       </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        {APPROVALS.map((a, i) => (
-          <Suspense key={i} fallback={<div className="h-56 rounded-2xl border bg-muted/30" />}>
-            <ApprovalCard {...a} />
-          </Suspense>
-        ))}
-      </div>
+      {approvals.length === 0 ? (
+        <EmptyState icon={CheckCircle2} title="All caught up" description="When an agent needs your approval, it will appear here." />
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {approvals.map((a) => (
+            <ApprovalCard key={a.id} approvalId={a.id} agentName={a.agent_name}
+              action={a.action} summary={a.action} reasoning={a.reasoning ?? undefined}
+              confidence={a.confidence ?? undefined} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
-
