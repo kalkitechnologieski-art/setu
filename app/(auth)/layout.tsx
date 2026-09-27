@@ -1,17 +1,16 @@
 import Link from "next/link";
-import { Sparkles, Shield, Zap, TrendingUp } from "lucide-react";
+import { Shield, Sparkles, TrendingUp, Zap } from "lucide-react";
 import { AuroraBackground } from "@/components/ui/premium/aurora-background";
 
 const HIGHLIGHTS = [
-  { icon: Zap,          text: "Four AI employees running in parallel" },
-  { icon: TrendingUp,   text: "Cross-platform ads, one control plane" },
-  { icon: Shield,       text: "Every write gated by human approval" },
+  { icon: Zap,        text: "Four AI employees running in parallel" },
+  { icon: TrendingUp, text: "Cross-platform ads, one control plane" },
+  { icon: Shield,     text: "Every write gated by human approval" },
 ];
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="relative flex min-h-screen bg-background">
-      {/* ── Left panel: brand + gradient ───────────────────────────────── */}
       <aside className="relative hidden w-1/2 overflow-hidden lg:block">
         <AuroraBackground opacity={0.7} />
         <div className="relative z-10 flex h-full flex-col justify-between p-12">
@@ -59,13 +58,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
       </aside>
 
-      {/* ── Right panel: form ─────────────────────────────────────────── */}
       <main className="relative flex w-full flex-1 items-center justify-center px-4 py-12 lg:w-1/2 lg:px-12">
-        {/* Mobile brand mark */}
-        <Link
-          href="/"
-          className="absolute left-4 top-6 flex items-center gap-2 lg:hidden"
-        >
+        <Link href="/" className="absolute left-4 top-6 flex items-center gap-2 lg:hidden">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-600 to-blue-600 text-white">
             <Sparkles className="size-4" />
           </span>

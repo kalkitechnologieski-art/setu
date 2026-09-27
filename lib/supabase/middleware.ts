@@ -1,58 +1,47 @@
 // lib/supabase/middleware.ts
+// ───────────────────────────────────────────────────────────────────────────
+// Session refresh + route protection.
+//
+// Middleware is the ONLY place that writes auth cookies — Server Components
+// cannot. It runs before every matched request and refreshes the session
+// if the access token has expired. Without this, users are silently signed
+// out after 1 hour.
+//
+// Public paths (manifest, robots, static assets) bypass auth entirely so
+// unauthenticated requests to /manifest.webmanifest etc. never 401.
+// ───────────────────────────────────────────────────────────────────────────
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./types";
 
-/**
- * Routes that require an authenticated session.
- */
 const PROTECTED_PREFIXES = [
   "/dashboard", "/inbox", "/workforce", "/leads", "/campaigns",
   "/performance", "/signals", "/calls", "/analytics", "/workflows",
   "/approvals", "/settings", "/connect", "/ops",
 ];
 
-/**
- * Routes that must never require auth — static assets, auth pages, and
- * metadata files. Without these, the browser's manifest fetch, sitemap
- * crawler, and favicon request all fail with 401 because middleware
- * intercepts them before Next.js can serve the response.
- *
- * This is the PWA manifest fix documented in the Next.js middleware
- * pattern — PUBLIC_PATHS still applies CSP headers, but skips the auth
- * redirect.
- */
-const PUBLIC_PATHS = new Set([
-  "/",
+const AUTH_PAGES = new Set([
   "/login",
   "/signup",
-  "/callback",
+  "/forgot-password",
+  "/reset-password",
+  "/verify",
   "/onboarding",
-  "/forgot-password",
-  "/reset-password",
-  "/manifest.webmanifest",
-  "/robots.txt",
-  "/sitemap.xml",
-  "/favicon.ico",
-  "/icon.svg",
-  "/icon.png",
-  "/apple-icon.png",
-  "/apple-icon.svg",
-  "/opengraph-image",
-  "/twitter-image",
 ]);
 
-const AUTH_ONLY_PATHS = new Set([
-  "/login",
-  "/signup",
-  "/forgot-password",
-  "/reset-password",
-]);
+function isStaticAsset(pathname: string): boolean {
+  return /\.(?:ico|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|eot|webmanifest|txt|xml|json)$/i.test(pathname);
+}
 
-function isPublicPath(pathname: string): boolean {
-  if (PUBLIC_PATHS.has(pathname)) return true;
-  // Match any path whose last segment is a static file extension
-  return /\.(?:ico|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|eot|webmanifest|txt|xml)$/i.test(pathname);
+function isPublicMetadata(pathname: string): boolean {
+  return (
+    pathname === "/" ||
+    pathname === "/manifest.webmanifest" ||
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml" ||
+    pathname === "/favicon.ico" ||
+    isStaticAsset(pathname)
+  );
 }
 
 export async function updateSession(request: NextRequest) {
@@ -89,24 +78,27 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
+  // Refresh the session on every request. Uses getUser() not getSession():
+  // getUser() verifies the JWT signature, getSession() does not.
   const { data: { user } } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
 
-  // Never redirect static assets or metadata files.
-  if (isPublicPath(path)) {
-    // If already signed in and hitting an auth-only page, redirect to dashboard
-    if (user && AUTH_ONLY_PATHS.has(path)) {
-      const redirect = request.nextUrl.clone();
-      redirect.pathname = "/dashboard";
-      redirect.search = "";
-      return NextResponse.redirect(redirect);
-    }
+  // Static assets + metadata — never auth-protected.
+  if (isPublicMetadata(path)) {
     return response;
   }
 
-  const isProtected = PROTECTED_PREFIXES.some((p) => path.startsWith(p));
+  // Already-signed-in user visiting an auth page → send to dashboard.
+  if (user && AUTH_PAGES.has(path)) {
+    const redirect = request.nextUrl.clone();
+    redirect.pathname = "/dashboard";
+    redirect.search = "";
+    return NextResponse.redirect(redirect);
+  }
 
+  // Unauthenticated user visiting a protected route → login.
+  const isProtected = PROTECTED_PREFIXES.some((p) => path.startsWith(p));
   if (!user && isProtected) {
     const redirect = request.nextUrl.clone();
     redirect.pathname = "/login";

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SocialButtons } from "@/components/auth/social-buttons";
-import { LoginForm } from "@/components/auth/login-form";
+import { SignInForm } from "@/components/auth/signin-form";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,6 @@ export default async function LoginPage({ searchParams }: PageProps) {
   const next = params.next ?? "/dashboard";
   const errorMessage = params.error;
 
-  // If already signed in, bounce to dashboard.
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (user) redirect(next);
@@ -24,16 +23,11 @@ export default async function LoginPage({ searchParams }: PageProps) {
     <div className="space-y-8 animate-fade-up">
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Welcome back</h1>
-        <p className="text-sm text-muted-foreground">
-          Sign in to your workspace to continue.
-        </p>
+        <p className="text-sm text-muted-foreground">Sign in to your workspace to continue.</p>
       </header>
 
       {errorMessage && (
-        <div
-          role="alert"
-          className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
-        >
+        <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {errorMessage}
         </div>
       )}
@@ -51,7 +45,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
         </div>
       </div>
 
-      <LoginForm next={next} />
+      <SignInForm next={next} />
 
       <p className="text-center text-sm text-muted-foreground">
         Don&apos;t have an account?{" "}

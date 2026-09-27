@@ -2,28 +2,25 @@
 
 import { useActionState } from "react";
 import { CheckCircle2 } from "lucide-react";
-import { signUpWithPassword, type AuthResult } from "@/app/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { signUpWithEmail } from "@/app/actions/auth";
+import type { AuthResult } from "@/lib/auth/result";
 
-/**
- * Signup form — Client Component.
- *
- * On success the Server Action returns `{ ok: true, message }` (no redirect,
- * since the user must confirm email first). We render the message inline.
- */
-export function SignupForm() {
-  const [state, formAction, isPending] = useActionState<
-    AuthResult | null,
-    FormData
-  >(async (_prev, formData) => signUpWithPassword(formData), null);
+export function SignUpForm({ next }: { next: string }) {
+  const [state, formAction, isPending] = useActionState<AuthResult | null, FormData>(
+    async (_prev, formData) => signUpWithEmail(formData),
+    null
+  );
 
   const showSuccess = state?.ok === true;
   const showError = state?.ok === false;
 
   return (
     <form action={formAction} className="space-y-4" noValidate>
+      <input type="hidden" name="next" value={next} />
+
       <div className="space-y-2">
         <Label htmlFor="full_name">Full name</Label>
         <Input
@@ -31,8 +28,13 @@ export function SignupForm() {
           name="full_name"
           autoComplete="name"
           placeholder="Aarav Sharma"
-          disabled={isPending}
+          required
+          disabled={isPending || showSuccess}
+          aria-invalid={showError && state.fieldErrors?.full_name ? true : undefined}
         />
+        {showError && state.fieldErrors?.full_name && (
+          <p className="text-xs text-destructive">{state.fieldErrors.full_name[0]}</p>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -44,9 +46,12 @@ export function SignupForm() {
           autoComplete="email"
           placeholder="you@company.com"
           required
-          disabled={isPending}
-          aria-invalid={showError ? true : undefined}
+          disabled={isPending || showSuccess}
+          aria-invalid={showError && state.fieldErrors?.email ? true : undefined}
         />
+        {showError && state.fieldErrors?.email && (
+          <p className="text-xs text-destructive">{state.fieldErrors.email[0]}</p>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -56,42 +61,31 @@ export function SignupForm() {
           name="password"
           type="password"
           autoComplete="new-password"
-          placeholder="At least 8 characters"
+          placeholder="At least 8 chars, 1 uppercase, 1 number"
           minLength={8}
           required
-          disabled={isPending}
-          aria-invalid={showError ? true : undefined}
+          disabled={isPending || showSuccess}
+          aria-invalid={showError && state.fieldErrors?.password ? true : undefined}
         />
+        {showError && state.fieldErrors?.password && (
+          <p className="text-xs text-destructive">{state.fieldErrors.password[0]}</p>
+        )}
       </div>
 
-      {showError && (
-        <div
-          role="alert"
-          aria-live="polite"
-          className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
-        >
-          {state.error}
+      {showError && !state.fieldErrors && (
+        <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          {state.message}
         </div>
       )}
 
       {showSuccess && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400"
-        >
+        <div role="status" className="flex items-start gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
           <CheckCircle2 className="mt-0.5 size-3.5 shrink-0" />
           <span>{state.message ?? "Check your email to confirm your account."}</span>
         </div>
       )}
 
-      <Button
-        type="submit"
-        variant="gradient"
-        size="lg"
-        className="w-full"
-        disabled={isPending || showSuccess}
-      >
+      <Button type="submit" variant="gradient" size="lg" className="w-full" disabled={isPending || showSuccess}>
         {isPending ? "Creating…" : showSuccess ? "Check your inbox" : "Create account"}
       </Button>
 

@@ -8,12 +8,8 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  /**
-   * Skip middleware for static assets, Next.js internals, and metadata.
-   * This eliminates the 401 on /manifest.webmanifest, /favicon.ico,
-   * /robots.txt, and /sitemap.xml by never running middleware for them.
-   */
   matcher: [
+    // Skip middleware for static assets, Next.js internals, and metadata.
     "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|robots.txt|sitemap.xml|icon|apple-icon|opengraph-image|twitter-image|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff2?|ttf|eot|txt|xml|webmanifest)$).*)",
   ],
 };
