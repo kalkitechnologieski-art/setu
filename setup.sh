@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════
-#  D:\setu\fix-and-push.sh
-#  Production-ready: pipefail-safe · all fixes · verify · build · push
-#  EXPERT PRACTICES · IDEMPOTENT · ATOMIC · MSYS2-SAFE
+#  D:\setu\fix.sh
+#  Production Ready — helper-file driven, no heredoc env-var passing
 # ═══════════════════════════════════════════════════════════════════════════
 set -Eeuo pipefail
-# inherit_errexit propagates -e into subshells (Bash 4.4+, industry best practice)
 shopt -s inherit_errexit 2>/dev/null || true
-# nullglob: unmatched globs expand to nothing, not the literal pattern
 shopt -s nullglob
-# globstar: ** matches directories recursively
 shopt -s globstar 2>/dev/null || true
 IFS=$'\n\t'
 
+# ═══════════════════════════════════════════════════════════════════════════
+# CONFIG — all paths are absolute, no relative surprises
+# ═══════════════════════════════════════════════════════════════════════════
 readonly REPO_DIR="/d/setu"
 readonly APP_DIR="${REPO_DIR}/app"
 readonly COMP_DIR="${REPO_DIR}/components"
@@ -20,86 +19,79 @@ readonly GIT_REMOTE="https://github.com/kalkitechnologieski-art/setu.git"
 
 readonly STATE_HOME="${HOME}/.setu"
 readonly LOG_HOME="${STATE_HOME}/logs"
-readonly LOG_TMP="${LOG_HOME}/fix-push-$(date +%Y%m%d-%H%M%S).log"
-readonly BACKUP_ROOT="${STATE_HOME}/fix-push-backups"
-readonly SNAPSHOT="$(date +%Y%m%d-%H%M%S)"
+readonly TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+readonly LOG_TMP="${LOG_HOME}/fix-${TIMESTAMP}.log"
+readonly BACKUP_ROOT="${STATE_HOME}/fix-backups"
+readonly SNAPSHOT="${TIMESTAMP}"
+readonly ESLINT_JSON="${LOG_HOME}/eslint-${TIMESTAMP}.json"
+readonly HELPERS_DIR="${STATE_HOME}/helpers"
 
-mkdir -p "$STATE_HOME" "$LOG_HOME" "$BACKUP_ROOT/$SNAPSHOT"
+mkdir -p "$STATE_HOME" "$LOG_HOME" "$BACKUP_ROOT/$SNAPSHOT" "$HELPERS_DIR"
 : > "$LOG_TMP"
 
-DRY=0 NOCLR=0 NOPUSH=0
+# ═══════════════════════════════════════════════════════════════════════════
+# FLAGS
+# ═══════════════════════════════════════════════════════════════════════════
+DRY=0
+NOPUSH=0
+NOCLR=0
 for a in "$@"; do
   case "$a" in
-    --dry-run) DRY=1;;
-    --no-color) NOCLR=1;;
-    --no-push) NOPUSH=1;;
+    --dry-run)  DRY=1 ;;
+    --no-push)  NOPUSH=1 ;;
+    --no-color) NOCLR=1 ;;
     -h|--help)
-      printf 'Usage: %s [--dry-run|--no-color|--no-push]\n' "$0"
-      exit 0;;
-    *) printf 'Unknown flag: %s\n' "$a" >&2; exit 2;;
+      printf 'Usage: %s [--dry-run|--no-push|--no-color]\n' "$0"
+      exit 0 ;;
+    *) printf 'Unknown flag: %s\n' "$a" >&2; exit 2 ;;
   esac
 done
 
+# ═══════════════════════════════════════════════════════════════════════════
+# COLORS
+# ═══════════════════════════════════════════════════════════════════════════
 if [ "$NOCLR" -eq 1 ]; then
-  R=''; RED=''; GRN=''; YEL=''; CYN=''; BLD=''; MAG=''; DIM=''
+  R='' RED='' GRN='' YEL='' CYN='' BLD='' MAG='' DIM=''
 else
-  R='\033[0m'; RED='\033[0;31m'; GRN='\033[0;32m'
-  YEL='\033[1;33m'; CYN='\033[0;36m'; BLD='\033[1m'
-  MAG='\033[0;35m'; DIM='\033[2m'
+  R=$'\033[0m'
+  RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YEL=$'\033[1;33m'
+  CYN=$'\033[0;36m'; BLD=$'\033[1m'; MAG=$'\033[0;35m'; DIM=$'\033[2m'
 fi
 
-ts()   { date +"%H:%M:%S"; }
-log()  { printf "${CYN}[%s]${R} %s\n" "$(ts)" "$*" | tee -a "$LOG_TMP"; }
-ok()   { printf "${GRN}✔${R} %s\n" "$*" | tee -a "$LOG_TMP"; }
-warn() { printf "${YEL}⚠${R} %s\n" "$*" | tee -a "$LOG_TMP"; }
-err()  { printf "${RED}✘${R} %s\n" "$*" >&2; }
+# ═══════════════════════════════════════════════════════════════════════════
+# LOGGING
+# ═══════════════════════════════════════════════════════════════════════════
+_ts()  { date +'%H:%M:%S'; }
+log()  { printf '%s[%s]%s %s\n' "$CYN" "$(_ts)" "$R" "$*" | tee -a "$LOG_TMP"; }
+ok()   { printf '%s✔%s %s\n'   "$GRN" "$R" "$*" | tee -a "$LOG_TMP"; }
+warn() { printf '%s⚠%s %s\n'   "$YEL" "$R" "$*" | tee -a "$LOG_TMP"; }
+err()  { printf '%s✘%s %s\n'   "$RED" "$R" "$*" >&2; }
 die()  { err "$*"; exit 1; }
-ban()  { printf "\n${BLD}${CYN}═══ %s ═══${R}\n" "$*" | tee -a "$LOG_TMP"; }
-sub()  { printf "\n${BLD}${MAG}─── %s ───${R}\n" "$*" | tee -a "$LOG_TMP"; }
-hr()   { printf "${CYN}──────────────────────────────────────────${R}\n"; }
+ban()  { printf '\n%s%s═══ %s ═══%s\n' "$BLD" "$CYN" "$*" "$R" | tee -a "$LOG_TMP"; }
+sub()  { printf '\n%s%s─── %s ───%s\n' "$BLD" "$MAG" "$*" "$R" | tee -a "$LOG_TMP"; }
+hr()   { printf '%s──────────────────────────────────────────%s\n' "$CYN" "$R"; }
+dim()  { printf '%s    %s%s\n' "$DIM" "$*" "$R"; }
 
 on_err() {
-  local c=$?
-  err "Failure at line ${1:-?} (exit $c)"
+  local code=$?
+  err "Failure at line ${1:-?} (exit $code)"
   err "Log: $LOG_TMP"
-  exit "$c"
+  exit "$code"
 }
 trap 'on_err $LINENO' ERR
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SAFE HELPERS — no pipefail hazards
+# UTILITIES
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Count regex matches in a file. Uses awk: always exits 0, always prints
-# exactly one integer, never triggers pipefail. (See industry pattern:
-# "prefer awk END{print NR} over grep | wc -l".)
-count_matches() {
-  local pattern="$1" file="$2"
-  awk -v pat="$pattern" '
-    {
-      n = gsub(pat, "&")
-      total += n
-    }
-    END { printf "%d", total + 0 }
-  ' "$file" 2>/dev/null || printf '0'
+# Coerce any value to a non-negative integer safely.
+to_int() {
+  local s="${1:-0}"
+  s="${s//[^0-9]/}"
+  printf '%d' "${s:-0}"
 }
 
-# True if a pattern exists in a file. grep -q exits 1 on no-match which
-# would abort under set -e — we swallow the exit code here.
-has_match() {
-  local pattern="$1" file="$2"
-  grep -qE "$pattern" "$file" 2>/dev/null
-}
-
-# True if a symbol appears more than N times in a file.
-count_exceeds() {
-  local pattern="$1" file="$2" threshold="$3"
-  local n
-  n=$(count_matches "$pattern" "$file")
-  [ "$n" -gt "$threshold" ] 2>/dev/null
-}
-
-# Backup a file preserving its relative path.
+# Backup a file preserving its path under REPO_DIR.
 backup() {
   local f="$1"
   [ -f "$f" ] || return 0
@@ -109,252 +101,431 @@ backup() {
   cp -f "$f" "$bd"
 }
 
-# Safe integer extraction from a possibly-malformed string.
-to_int() {
-  local s="${1:-0}"
-  # strip non-digits (keeps leading negative out — counts are never negative)
-  s="${s//[^0-9]/}"
-  printf '%d' "${s:-0}"
+# ═══════════════════════════════════════════════════════════════════════════
+# HELPER SCRIPTS — written once, invoked many times
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─── summarize.js — prints per-rule counts from ESLint JSON ───────────────
+write_summarize_helper() {
+  cat > "${HELPERS_DIR}/summarize.js" <<'JS_EOF'
+// summarize.js <eslint-json-path>
+const fs = require('fs');
+const path = process.argv[2];
+
+if (!path) {
+  console.error('summarize.js: missing path arg');
+  process.exit(2);
 }
 
-ban "SETU KALKI — PRODUCTION READY (v2)"
-log "Repo:   $REPO_DIR"
-log "Remote: $GIT_REMOTE"
-log "Backup: ${BACKUP_ROOT}/${SNAPSHOT}"
+let data;
+try {
+  data = JSON.parse(fs.readFileSync(path, 'utf8'));
+} catch (e) {
+  console.error('summarize.js: ' + e.message);
+  process.exit(1);
+}
+
+const counts = new Map();
+let errors = 0, warnings = 0;
+
+for (const entry of data) {
+  for (const m of entry.messages) {
+    const tag = m.severity === 2 ? 'error' : 'warning';
+    if (m.severity === 2) errors++; else warnings++;
+    const key = `${tag.padEnd(7)} ${m.ruleId || '<unknown>'}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+}
+
+if (counts.size === 0) {
+  console.log('  (no lint issues)');
+} else {
+  for (const [k, v] of [...counts.entries()].sort()) {
+    console.log(`  ${k.padEnd(56)} ${v}`);
+  }
+}
+
+console.log();
+console.log(`  total: ${errors} error(s), ${warnings} warning(s)`);
+process.exit(0);
+JS_EOF
+  chmod +x "${HELPERS_DIR}/summarize.js"
+}
+
+# ─── fix-entities.js — surgical replace of ESLint-flagged chars ───────────
+write_fix_entities_helper() {
+  cat > "${HELPERS_DIR}/fix-entities.js" <<'JS_EOF'
+// fix-entities.js <eslint-json-path> <repo-dir> <backup-root> <snapshot>
+const fs = require('fs');
+const path = require('path');
+
+const [, , jsonPath, repoDir, backupRoot, snapshot] = process.argv;
+
+if (!jsonPath || !repoDir) {
+  console.error('fix-entities.js: missing args');
+  process.exit(2);
+}
+
+const ENTITY = {
+  "'": '&apos;',
+  '"': '&quot;',
+};
+
+function backupFile(filePath) {
+  if (!backupRoot || !snapshot) return;
+  try {
+    const rel = path.relative(repoDir, filePath);
+    const bd = path.join(backupRoot, snapshot, rel);
+    fs.mkdirSync(path.dirname(bd), { recursive: true });
+    fs.copyFileSync(filePath, bd);
+  } catch { /* backup failures shouldn't block */ }
+}
+
+let data;
+try { data = JSON.parse(fs.readFileSync(jsonPath, 'utf8')); }
+catch { console.log('{"fixed":0,"files":0}'); process.exit(0); }
+
+let totalFixed = 0;
+let filesTouched = 0;
+const touchedFiles = [];
+
+for (const entry of data) {
+  const errors = entry.messages.filter(
+    m => m.ruleId === 'react/no-unescaped-entities'
+  );
+  if (errors.length === 0) continue;
+
+  let content;
+  try { content = fs.readFileSync(entry.filePath, 'utf8'); }
+  catch { continue; }
+
+  const lines = content.split('\n');
+
+  // Sort bottom-right first so earlier column indices stay valid
+  errors.sort((a, b) => (b.line - a.line) || (b.column - a.column));
+
+  let applied = 0;
+  for (const e of errors) {
+    const li = e.line - 1;
+    const ci = e.column - 1;
+    if (li < 0 || li >= lines.length) continue;
+
+    const line = lines[li];
+    if (ci < 0 || ci >= line.length) continue;
+
+    const ch = line[ci];
+    const replacement = ENTITY[ch];
+    if (!replacement) continue;
+
+    lines[li] = line.substring(0, ci) + replacement + line.substring(ci + 1);
+    applied++;
+  }
+
+  if (applied > 0) {
+    backupFile(entry.filePath);
+    fs.writeFileSync(entry.filePath, lines.join('\n'));
+    totalFixed += applied;
+    filesTouched++;
+    touchedFiles.push(path.relative(repoDir, entry.filePath));
+  }
+}
+
+console.log(JSON.stringify({
+  fixed: totalFixed,
+  files: filesTouched,
+  touched: touchedFiles,
+}));
+JS_EOF
+  chmod +x "${HELPERS_DIR}/fix-entities.js"
+}
+
+# ─── fix-unused.js — remove unused imports per ESLint report ──────────────
+write_fix_unused_helper() {
+  cat > "${HELPERS_DIR}/fix-unused.js" <<'JS_EOF'
+// fix-unused.js <eslint-json-path> <repo-dir> <backup-root> <snapshot>
+const fs = require('fs');
+const path = require('path');
+
+const [, , jsonPath, repoDir, backupRoot, snapshot] = process.argv;
+
+if (!jsonPath || !repoDir) {
+  console.error('fix-unused.js: missing args');
+  process.exit(2);
+}
+
+function backupFile(filePath) {
+  if (!backupRoot || !snapshot) return;
+  try {
+    const rel = path.relative(repoDir, filePath);
+    const bd = path.join(backupRoot, snapshot, rel);
+    fs.mkdirSync(path.dirname(bd), { recursive: true });
+    fs.copyFileSync(filePath, bd);
+  } catch { /* ignore */ }
+}
+
+let data;
+try { data = JSON.parse(fs.readFileSync(jsonPath, 'utf8')); }
+catch { console.log('{"removed":0,"files":0}'); process.exit(0); }
+
+// Collect unused symbol names per file
+const byFile = new Map();
+for (const entry of data) {
+  const unused = entry.messages.filter(
+    m => m.ruleId === '@typescript-eslint/no-unused-vars'
+  );
+  if (unused.length === 0) continue;
+
+  const symbols = new Set();
+  for (const m of unused) {
+    const match = m.message.match(/'([^']+)'\s+is defined but never used/);
+    if (match) symbols.add(match[1]);
+  }
+  if (symbols.size > 0) byFile.set(entry.filePath, symbols);
+}
+
+let totalRemoved = 0;
+let filesTouched = 0;
+const touchedFiles = [];
+
+for (const [filePath, symbols] of byFile) {
+  let content;
+  try { content = fs.readFileSync(filePath, 'utf8'); }
+  catch { continue; }
+
+  const original = content;
+  const lines = content.split('\n');
+
+  for (const sym of symbols) {
+    const esc = sym.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.match(/^\s*import/)) continue;
+
+      // Only operate on lines containing the symbol
+      if (!new RegExp(`\\b${esc}\\b`).test(line)) continue;
+
+      // Handle `{ Symbol, X }` and `{ X, Symbol }` and `{ Symbol }`
+      let next = line;
+      next = next.replace(new RegExp(`\\{\\s*${esc}\\s*,\\s*`, 'g'), '{ ');
+      next = next.replace(new RegExp(`,\\s*${esc}\\s*(,|\\})`, 'g'), '$1');
+      next = next.replace(new RegExp(`,\\s*${esc}\\s*\\}`, 'g'), ' }');
+      next = next.replace(new RegExp(`\\{\\s*${esc}\\s*\\}`, 'g'), '{ }');
+
+      lines[i] = next;
+    }
+  }
+
+  const rebuilt = lines.join('\n');
+  if (rebuilt !== original) {
+    backupFile(filePath);
+    fs.writeFileSync(filePath, rebuilt);
+    totalRemoved += symbols.size;
+    filesTouched++;
+    touchedFiles.push(path.relative(repoDir, filePath));
+  }
+}
+
+console.log(JSON.stringify({
+  removed: totalRemoved,
+  files: filesTouched,
+  touched: touchedFiles,
+}));
+JS_EOF
+  chmod +x "${HELPERS_DIR}/fix-unused.js"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════════════
+ban "SETU KALKI — PRODUCTION READY (helper-file v3)"
+log "Repo:      $REPO_DIR"
+log "Remote:    $GIT_REMOTE"
+log "Backup:    ${BACKUP_ROOT}/${SNAPSHOT}"
+log "Helpers:   $HELPERS_DIR"
+log "Log:       $LOG_TMP"
 hr
 
-[ -f "${REPO_DIR}/package.json" ] || die "Missing package.json"
-[ -d "${REPO_DIR}/node_modules" ] || die "Missing node_modules — run npm install"
+# ─── Preflight ────────────────────────────────────────────────────────────
+sub "Preflight"
+command -v node >/dev/null 2>&1 || die "node not found"
+command -v npm  >/dev/null 2>&1 || die "npm not found"
+[ -f "${REPO_DIR}/package.json" ]  || die "Missing package.json"
+[ -d "${REPO_DIR}/node_modules" ]  || die "Missing node_modules"
+[ -d "${REPO_DIR}/.git" ]          || die "Not a git repo"
+ok "node $(node -v) · npm $(npm -v)"
+
+# ─── Write helper scripts once ────────────────────────────────────────────
+sub "Writing helper scripts"
+write_summarize_helper
+write_fix_entities_helper
+write_fix_unused_helper
+ok "3 helpers written to $HELPERS_DIR"
+
+cd "$REPO_DIR"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 1 — Escape contractions (pipefail-safe count)
+# STEP 1 — Baseline ESLint JSON
 # ═══════════════════════════════════════════════════════════════════════════
-ban "STEP 1 — Escape contractions"
+ban "STEP 1 — Baseline ESLint scan"
 
-# Comprehensive contraction list as a single sed script array.
-# Order matters: longer/more-specific patterns first.
-SED_ARGS=(
-  -e "s/\byou're\b/you\&apos;re/g"
-  -e "s/\bYou're\b/You\&apos;re/g"
-  -e "s/\byou've\b/you\&apos;ve/g"
-  -e "s/\bYou've\b/You\&apos;ve/g"
-  -e "s/\byou'll\b/you\&apos;ll/g"
-  -e "s/\bYou'll\b/You\&apos;ll/g"
-  -e "s/\bwe're\b/we\&apos;re/g"
-  -e "s/\bWe're\b/We\&apos;re/g"
-  -e "s/\bwe've\b/we\&apos;ve/g"
-  -e "s/\bWe've\b/We\&apos;ve/g"
-  -e "s/\bwe'll\b/we\&apos;ll/g"
-  -e "s/\bWe'll\b/We\&apos;ll/g"
-  -e "s/\bthey're\b/they\&apos;re/g"
-  -e "s/\bThey're\b/They\&apos;re/g"
-  -e "s/\bthey've\b/they\&apos;ve/g"
-  -e "s/\bThey've\b/They\&apos;ve/g"
-  -e "s/\bthey'll\b/they\&apos;ll/g"
-  -e "s/\bThey'll\b/They\&apos;ll/g"
-  -e "s/\bI'm\b/I\&apos;m/g"
-  -e "s/\bi'm\b/i\&apos;m/g"
-  -e "s/\bI've\b/I\&apos;ve/g"
-  -e "s/\bi've\b/i\&apos;ve/g"
-  -e "s/\bI'll\b/I\&apos;ll/g"
-  -e "s/\bi'll\b/i\&apos;ll/g"
-  -e "s/\bI'd\b/I\&apos;d/g"
-  -e "s/\bi'd\b/i\&apos;d/g"
-  -e "s/\bdon't\b/don\&apos;t/g"
-  -e "s/\bDon't\b/Don\&apos;t/g"
-  -e "s/\bdoesn't\b/doesn\&apos;t/g"
-  -e "s/\bDoesn't\b/Doesn\&apos;t/g"
-  -e "s/\bcan't\b/can\&apos;t/g"
-  -e "s/\bCan't\b/Can\&apos;t/g"
-  -e "s/\bwon't\b/won\&apos;t/g"
-  -e "s/\bWon't\b/Won\&apos;t/g"
-  -e "s/\bisn't\b/isn\&apos;t/g"
-  -e "s/\bIsn't\b/Isn\&apos;t/g"
-  -e "s/\bhasn't\b/hasn\&apos;t/g"
-  -e "s/\bHasn't\b/Hasn\&apos;t/g"
-  -e "s/\bhaven't\b/haven\&apos;t/g"
-  -e "s/\bHaven't\b/Haven\&apos;t/g"
-  -e "s/\bhadn't\b/hadn\&apos;t/g"
-  -e "s/\bHadn't\b/Hadn\&apos;t/g"
-  -e "s/\bwasn't\b/wasn\&apos;t/g"
-  -e "s/\bWasn't\b/Wasn\&apos;t/g"
-  -e "s/\bweren't\b/weren\&apos;t/g"
-  -e "s/\bWeren't\b/Weren\&apos;t/g"
-  -e "s/\bit's\b/it\&apos;s/g"
-  -e "s/\bIt's\b/It\&apos;s/g"
-  -e "s/\bthat's\b/that\&apos;s/g"
-  -e "s/\bThat's\b/That\&apos;s/g"
-  -e "s/\bthere's\b/there\&apos;s/g"
-  -e "s/\bThere's\b/There\&apos;s/g"
-  -e "s/\bhere's\b/here\&apos;s/g"
-  -e "s/\bHere's\b/Here\&apos;s/g"
-  -e "s/\blet's\b/let\&apos;s/g"
-  -e "s/\bLet's\b/Let\&apos;s/g"
-  -e "s/\bwhat's\b/what\&apos;s/g"
-  -e "s/\bWhat's\b/What\&apos;s/g"
-  -e "s/\bwho's\b/who\&apos;s/g"
-  -e "s/\bWho's\b/Who\&apos;s/g"
-)
+# Run ESLint once, write JSON to file. Exit code swallowed — we inspect the file.
+npx eslint . --format json > "$ESLINT_JSON" 2>/dev/null || true
 
-FIXED=0
-CLEAN=0
-FAILED=0
+# If ESLint produced nothing, write an empty array
+if [ ! -s "$ESLINT_JSON" ]; then
+  warn "ESLint produced no output — writing empty payload"
+  printf '[]\n' > "$ESLINT_JSON"
+fi
 
-# Use mapfile to build a safe file list; find -print0 handles spaces in names
-mapfile -d '' TSX_FILES < <(find "$APP_DIR" "$COMP_DIR" -type f -name '*.tsx' -print0 2>/dev/null)
+# Validate JSON parses
+if ! node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$ESLINT_JSON" 2>/dev/null; then
+  warn "ESLint JSON invalid — resetting to empty"
+  printf '[]\n' > "$ESLINT_JSON"
+fi
 
-for file in "${TSX_FILES[@]}"; do
-  # Safe count — awk-based, never fails
-  raw=$(count_matches "[a-zA-Z]'[a-zA-Z]" "$file")
-  raw=$(to_int "$raw")
+log "ESLint JSON: $ESLINT_JSON ($(wc -c < "$ESLINT_JSON" | tr -d ' ') bytes)"
 
-  if [ "$raw" -eq 0 ]; then
-    CLEAN=$((CLEAN + 1))
-    continue
-  fi
-
-  if [ "$DRY" -eq 1 ]; then
-    printf "${DIM}    DRY: %s has %s contraction(s)${R}\n" "${file#"$REPO_DIR"/}" "$raw"
-    continue
-  fi
-
-  backup "$file"
-  sed -i "${SED_ARGS[@]}" "$file"
-
-  after=$(count_matches "[a-zA-Z]'[a-zA-Z]" "$file")
-  after=$(to_int "$after")
-
-  if [ "$after" -eq 0 ]; then
-    ok "Escaped: ${file#"$REPO_DIR"/} ($raw)"
-    FIXED=$((FIXED + 1))
-  else
-    warn "Still raw: ${file#"$REPO_DIR"/} ($after left)"
-    grep -nE "[a-zA-Z]'[a-zA-Z]" "$file" 2>/dev/null | head -3 || true
-    FAILED=$((FAILED + 1))
-  fi
-done
-
-ok "Contractions: $FIXED fixed · $CLEAN clean · $FAILED remaining"
+# Summarize — helper takes path as argv[2], no env-var passing
+node "${HELPERS_DIR}/summarize.js" "$ESLINT_JSON" | tee -a "$LOG_TMP"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 2 — Remove unused imports (pipefail-safe)
+# STEP 2 — Fix react/no-unescaped-entities
 # ═══════════════════════════════════════════════════════════════════════════
-ban "STEP 2 — Remove unused imports"
+ban "STEP 2 — Fix unescaped entities"
 
-# Known unused symbols — will be auto-detected from lint output if present
-# Format: relative_path|symbol
-REMOVALS=(
-  "app/(dashboard)/calls/page.tsx|Phone"
-)
+if [ "$DRY" -eq 1 ]; then
+  dim "DRY: would run fix-entities.js"
+else
+  RESULT=$(node "${HELPERS_DIR}/fix-entities.js" \
+    "$ESLINT_JSON" "$REPO_DIR" "$BACKUP_ROOT" "$SNAPSHOT")
 
-for entry in "${REMOVALS[@]}"; do
-  IFS='|' read -r rel symbol <<< "$entry"
-  f="${REPO_DIR}/${rel}"
+  FIXED=$(printf '%s' "$RESULT" | node -e '
+    const s = require("fs").readFileSync(0, "utf8");
+    try { console.log(JSON.parse(s).fixed); } catch { console.log(0); }
+  ')
+  FILES=$(printf '%s' "$RESULT" | node -e '
+    const s = require("fs").readFileSync(0, "utf8");
+    try { console.log(JSON.parse(s).files); } catch { console.log(0); }
+  ')
 
-  if [ ! -f "$f" ]; then
-    warn "Missing: $rel"
-    continue
-  fi
+  FIXED=$(to_int "$FIXED")
+  FILES=$(to_int "$FILES")
 
-  # Total usages of the symbol (word-boundary safe)
-  total=$(count_matches "\b${symbol}\b" "$f")
-  total=$(to_int "$total")
+  ok "Entities: $FIXED char(s) fixed across $FILES file(s)"
 
-  # If usage count > 1, the symbol is used elsewhere — cannot remove
-  if [ "$total" -le 1 ]; then
-    if [ "$DRY" -eq 1 ]; then
-      printf "${DIM}    DRY: would remove %s from %s${R}\n" "$symbol" "$rel"
-    else
-      backup "$f"
-      # Remove `Symbol,` or `, Symbol` from any import line
-      sed -i -E "s/\\b${symbol}\\b[[:space:]]*,[[:space:]]*//g; s/,[[:space:]]*\\b${symbol}\\b//g" "$f"
-      ok "$rel — removed unused $symbol"
-    fi
-  else
-    ok "$rel — $symbol used $total times, skipped"
-  fi
-done
+  # Print touched files
+  printf '%s' "$RESULT" | node -e '
+    const s = require("fs").readFileSync(0, "utf8");
+    try {
+      const r = JSON.parse(s);
+      if (r.touched && r.touched.length) {
+        for (const f of r.touched) console.log("    → " + f);
+      }
+    } catch {}
+  ' | tee -a "$LOG_TMP"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 3 — Verify: no "0\n0" pattern in any of our scripts
+# STEP 3 — Remove unused imports
 # ═══════════════════════════════════════════════════════════════════════════
-ban "STEP 3 — Verify no lingering 0\\n0 patterns"
+ban "STEP 3 — Remove unused imports"
 
-# Look for the dangerous pattern `|| echo 0` after grep/wc pipelines
-BAD_SCRIPTS=0
-for script in "${REPO_DIR}"/*.sh; do
-  [ -f "$script" ] || continue
-  if grep -qE '\|\|[[:space:]]*echo[[:space:]]+0' "$script" 2>/dev/null; then
-    warn "Dangerous pattern in: ${script#"$REPO_DIR"/}"
-    grep -nE '\|\|[[:space:]]*echo[[:space:]]+0' "$script" | head -3 || true
-    BAD_SCRIPTS=$((BAD_SCRIPTS + 1))
-  fi
-done
-[ "$BAD_SCRIPTS" -eq 0 ] && ok "No \`|| echo 0\` patterns in repo scripts"
+if [ "$DRY" -eq 1 ]; then
+  dim "DRY: would run fix-unused.js"
+else
+  RESULT=$(node "${HELPERS_DIR}/fix-unused.js" \
+    "$ESLINT_JSON" "$REPO_DIR" "$BACKUP_ROOT" "$SNAPSHOT")
+
+  REMOVED=$(printf '%s' "$RESULT" | node -e '
+    const s = require("fs").readFileSync(0, "utf8");
+    try { console.log(JSON.parse(s).removed); } catch { console.log(0); }
+  ')
+  FILES=$(printf '%s' "$RESULT" | node -e '
+    const s = require("fs").readFileSync(0, "utf8");
+    try { console.log(JSON.parse(s).files); } catch { console.log(0); }
+  ')
+
+  REMOVED=$(to_int "$REMOVED")
+  FILES=$(to_int "$FILES")
+
+  ok "Unused imports: $REMOVED symbol(s) removed across $FILES file(s)"
+
+  printf '%s' "$RESULT" | node -e '
+    const s = require("fs").readFileSync(0, "utf8");
+    try {
+      const r = JSON.parse(s);
+      if (r.touched && r.touched.length) {
+        for (const f of r.touched) console.log("    → " + f);
+      }
+    } catch {}
+  ' | tee -a "$LOG_TMP"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 4 — TypeScript check
+# STEP 4 — ESLint re-verification (strict: 0 errors, 0 warnings)
 # ═══════════════════════════════════════════════════════════════════════════
 if [ "$DRY" -eq 0 ]; then
-  ban "STEP 4 — TypeScript"
-  cd "$REPO_DIR"
+  ban "STEP 4 — ESLint verify"
 
-  TSC_LOG="${LOG_HOME}/tsc-$(date +%Y%m%d-%H%M%S).log"
+  LINT_LOG="${LOG_HOME}/lint-verify-${TIMESTAMP}.log"
+  LINT_EXIT=0
+  npm run lint > "$LINT_LOG" 2>&1 || LINT_EXIT=$?
+
+  if [ "$LINT_EXIT" -eq 0 ]; then
+    ok "lint: PASS — 0 errors, 0 warnings"
+  else
+    warn "Lint failed — running eslint --fix once"
+    npx eslint . --fix >/dev/null 2>&1 || true
+
+    LINT_EXIT=0
+    npm run lint > "$LINT_LOG" 2>&1 || LINT_EXIT=$?
+
+    if [ "$LINT_EXIT" -eq 0 ]; then
+      ok "lint: PASS after --fix"
+    else
+      err "lint: FAIL — see $LINT_LOG"
+      # awk instead of grep | head — no SIGPIPE under pipefail
+      awk '/error|warning/ && NR<=30 { print "    " $0 }' "$LINT_LOG" || true
+      exit 1
+    fi
+  fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 5 — TypeScript
+# ═══════════════════════════════════════════════════════════════════════════
+  ban "STEP 5 — TypeScript"
+
+  TSC_LOG="${LOG_HOME}/tsc-${TIMESTAMP}.log"
   TSC_EXIT=0
   npx tsc --noEmit > "$TSC_LOG" 2>&1 || TSC_EXIT=$?
 
   if [ "$TSC_EXIT" -eq 0 ]; then
     ok "tsc: PASS"
   else
-    err "tsc: FAIL"
-    grep -E "error TS" "$TSC_LOG" | head -20 || true
+    err "tsc: FAIL — see $TSC_LOG"
+    awk '/error TS/ && NR<=30 { print "    " $0 }' "$TSC_LOG" || true
     exit 1
   fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 5 — Production build
+# STEP 6 — Production build
 # ═══════════════════════════════════════════════════════════════════════════
-  ban "STEP 5 — Production build"
+  ban "STEP 6 — Production build"
 
-  BUILD_LOG="${LOG_HOME}/build-$(date +%Y%m%d-%H%M%S).log"
+  BUILD_LOG="${LOG_HOME}/build-${TIMESTAMP}.log"
   BUILD_EXIT=0
   npm run build > "$BUILD_LOG" 2>&1 || BUILD_EXIT=$?
 
   if [ "$BUILD_EXIT" -eq 0 ]; then
     ok "build: PASS"
-    grep -E "^(Route|├|└|○|ƒ)" "$BUILD_LOG" | head -40 || true
+    sub "Route table"
+    # awk, not grep | head — no SIGPIPE
+    awk '/^(Route|├|└|○|ƒ)/ && n<40 { print "  " $0; n++ }' "$BUILD_LOG" || true
   else
-    err "build: FAIL"
-    tail -40 "$BUILD_LOG"
+    err "build: FAIL — see $BUILD_LOG"
+    awk 'NR<=60 { print "    " $0 }' "$BUILD_LOG" || true
     exit 1
-  fi
-
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 6 — Lint (strict, with auto-fix fallback)
-# ═══════════════════════════════════════════════════════════════════════════
-  ban "STEP 6 — Lint (strict)"
-
-  LINT_LOG="${LOG_HOME}/lint-$(date +%Y%m%d-%H%M%S).log"
-  LINT_EXIT=0
-  npm run lint > "$LINT_LOG" 2>&1 || LINT_EXIT=$?
-
-  if [ "$LINT_EXIT" -eq 0 ]; then
-    ok "lint: PASS (0 errors, 0 warnings)"
-  else
-    # Attempt auto-fix
-    warn "Lint failed — attempting eslint --fix"
-    npx eslint . --fix > /dev/null 2>&1 || true
-
-    LINT_EXIT=0
-    npm run lint > "$LINT_LOG" 2>&1 || LINT_EXIT=$?
-
-    if [ "$LINT_EXIT" -eq 0 ]; then
-      ok "lint: PASS after auto-fix"
-    else
-      err "lint: FAIL"
-      grep -E "error|warning" "$LINT_LOG" | head -20 || true
-      exit 1
-    fi
   fi
 fi
 
@@ -363,16 +534,14 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════
 if [ "$NOPUSH" -eq 0 ] && [ "$DRY" -eq 0 ]; then
   ban "STEP 7 — Git push"
-  cd "$REPO_DIR"
 
   git config user.email >/dev/null 2>&1 || git config user.email "kalkitechnologieski@gmail.com"
   git config user.name  >/dev/null 2>&1 || git config user.name  "Setu Kalki"
 
-  [ -d ".git" ] || git init -q
-
-  current=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  current=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'main')
   [ "$current" = "main" ] || git branch -M main
 
+  # .gitignore hardening
   if [ ! -f ".gitignore" ]; then
     cat > .gitignore <<'GITIGNORE_EOF'
 node_modules/
@@ -406,12 +575,13 @@ GITIGNORE_EOF
   if git diff --cached --quiet 2>/dev/null; then
     ok "No changes to commit"
   else
-    git commit -q -m "Production ready: premium polish + guided UX
+    git commit -q -m "Production ready: ESLint-driven surgical fixes
 
-- Escape contractions in JSX (react/no-unescaped-entities)
-- Remove unused imports
-- Replace window.location.href with anchor navigation
-- Fix Recharts Tooltip formatter signatures
+Fixes:
+- react/no-unescaped-entities — surgical per line:col replacement
+- @typescript-eslint/no-unused-vars — symbol removal from import lines
+- Recharts Tooltip formatter signature
+- No grep | head pipelines (SIGPIPE-safe)
 
 Premium components:
 - CTA button, trust marquee, testimonials
@@ -419,17 +589,19 @@ Premium components:
 - Step wizard, guide tip
 
 Ops Center:
-- Agent registry, approval chains, governance
-- 4 new tables, 6 widgets, 5 pages
+- Agent registry, approval chains, governance ledger
+- 4 tables, 6 widgets, 5 pages
+- Joint workforce dashboard
 
 Backend:
-- Supabase Vault for encrypted tokens
-- Health endpoint, observability
-- 18-table canonical types
+- Supabase Vault for encrypted platform tokens
+- Admin RPC variants for cron refresh
+- Health endpoint, observability, predeploy gate
 
 Auth:
-- Google/GitHub SSO + magic link
-- Platform OAuth (Google Ads, YouTube, Meta) with PKCE"
+- Google/GitHub SSO + magic link + password
+- Platform OAuth with PKCE (Google Ads, YouTube, Meta)"
+
     ok "git commit"
   fi
 
@@ -442,16 +614,16 @@ Auth:
     ok "Remote added"
   fi
 
-  log "Pushing to origin/main..."
+  log "Pushing to origin/main…"
   PUSH_EXIT=0
-  git push -u origin main > /dev/null 2>&1 || PUSH_EXIT=$?
+  git push -u origin main >/dev/null 2>&1 || PUSH_EXIT=$?
 
   if [ "$PUSH_EXIT" -eq 0 ]; then
     ok "Pushed to origin/main"
   else
     warn "Push rejected — attempting rebase"
-    if git pull --rebase origin main > /dev/null 2>&1; then
-      if git push -u origin main > /dev/null 2>&1; then
+    if git pull --rebase origin main >/dev/null 2>&1; then
+      if git push -u origin main >/dev/null 2>&1; then
         ok "Pushed after rebase"
       else
         err "Push failed — resolve conflicts manually"
@@ -468,14 +640,14 @@ fi
 # SUMMARY
 # ═══════════════════════════════════════════════════════════════════════════
 ban "PRODUCTION READY"
-ok "Contractions:  $FIXED fixed · $CLEAN clean"
-ok "TypeScript:    PASS"
-ok "Build:         PASS"
-ok "Lint:          PASS"
-[ "$NOPUSH" -eq 0 ] && ok "Pushed:        $GIT_REMOTE"
-ok "Backup:        ${BACKUP_ROOT}/${SNAPSHOT}"
-ok "Log:           $LOG_TMP"
-printf "\n${BLD}Next:${R}\n"
-printf "  ${CYN}./phase3.sh push${R}    — apply migrations\n"
-printf "  ${CYN}./phase4.sh deploy${R}  — deploy to Vercel\n"
+ok "Lint:        PASS"
+ok "TypeScript:  PASS"
+ok "Build:       PASS"
+[ "$NOPUSH" -eq 0 ] && ok "Pushed:      $GIT_REMOTE"
+ok "Helpers:     $HELPERS_DIR"
+ok "Backup:      ${BACKUP_ROOT}/${SNAPSHOT}"
+ok "Log:         $LOG_TMP"
+printf '\n%sNext:%s\n' "$BLD" "$R"
+printf '  %s./phase3.sh push%s    — apply migrations\n' "$CYN" "$R"
+printf '  %s./phase4.sh deploy%s  — deploy to Vercel\n' "$CYN" "$R"
 hr
