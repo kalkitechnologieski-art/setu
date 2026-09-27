@@ -130,3 +130,61 @@ Logs:
 - Vercel: `vercel logs https://your-app.vercel.app`
 - Supabase: Dashboard → Logs → Postgres / API / Auth
 - Local: `~/.setu/logs/`
+
+---
+
+## Netlify Secrets Scanner
+
+Netlify's build pipeline runs a secrets scanner after every build. It
+searches the compiled output for the literal values of every environment
+variable. If a value is found, the build fails:
+
+    Secrets scanning found secrets in build.
+    Secret env var "NEXT_PUBLIC_SUPABASE_URL"'s value detected:
+      found value at line 110 in .netlify/edge-functions/...
+      /___netlify-edge-handler-middleware/server/middleware.js
+
+### Why this happens
+
+Next.js **inlines every `NEXT_PUBLIC_*` variable** at build time. The
+values end up inside client bundles and inside the middleware edge
+function. That's by design — those variables are meant to be shipped to
+browsers.
+
+Netlify's scanner cannot distinguish public-by-design variables from true
+secrets. It flags any env var value it finds in build output.
+
+### The fix
+
+`netlify.toml` includes a whitelist of the three public variables:
+
+    [build.environment]
+      SECRETS_SCAN_ENABLED = "true"
+      SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,NEXT_PUBLIC_APP_URL"
+
+The scanner still runs — it just ignores those specific keys. Real secrets
+(SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY, RESEND_API_KEY, AGENTCALL_API_KEY,
+MARKIFACT_API_KEY, LANGSMITH_API_KEY, CRON_SECRET, GOOGLE_ADS_CLIENT_SECRET,
+META_ADS_CLIENT_SECRET) do not have the NEXT_PUBLIC_ prefix, are never
+inlined, and remain fully subject to the scanner.
+
+### If you deploy via Netlify UI
+
+The same variable can be set manually:
+
+**Site configuration → Build & deploy → Environment variables:**
+
+    SECRETS_SCAN_OMIT_KEYS = NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,NEXT_PUBLIC_APP_URL
+
+Then trigger **Deploys → Trigger deploy → Clear cache and deploy site**.
+
+### Other scanner controls
+
+| Variable | Purpose |
+|---|---|
+| `SECRETS_SCAN_ENABLED` | Set to `"false"` to disable scanning entirely (not recommended) |
+| `SECRETS_SCAN_OMIT_KEYS` | Comma-separated env var **names** to skip |
+| `SECRETS_SCAN_OMIT_PATHS` | Glob patterns of file paths to skip |
+| `SECRETS_SCAN_SMART_DETECTION_ENABLED` | Set to `"false"` to disable heuristic detection |
+
+Use `SECRETS_SCAN_OMIT_KEYS` — never disable scanning globally.

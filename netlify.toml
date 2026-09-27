@@ -2,25 +2,45 @@
 # Setu Kalki Intelligence — Netlify configuration
 # ═══════════════════════════════════════════════════════════════════════════
 # Next.js 15 App Router is fully supported on Netlify via the OpenNext
-# adapter (@netlify/plugin-nextjs v5+). No manual build wrapping required.
+# adapter (@netlify/plugin-nextjs v5+). Every feature is available:
+#   Server Components · Server Actions · Middleware · Route Handlers
+#   Streaming · ISR · Image Optimization · Revalidation
 # ═══════════════════════════════════════════════════════════════════════════
 
 [build]
   command = "npm run build"
   publish = ".next"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# BUILD ENVIRONMENT
+# ═══════════════════════════════════════════════════════════════════════════
+# SECRETS_SCAN_OMIT_KEYS
+#   Next.js INLINES every NEXT_PUBLIC_* variable at build time. Those values
+#   end up in client bundles and in edge function bundles — by design, since
+#   NEXT_PUBLIC_* vars are meant to be shipped to browsers.
+#
+#   Netlify's secrets scanner runs after every build and flags ANY env var
+#   value that appears in the output. It cannot distinguish public-by-design
+#   vars from true secrets, so we must explicitly whitelist the public ones.
+#
+#   These three values ARE public by design:
+#     NEXT_PUBLIC_SUPABASE_URL              — project URL, visible in browser
+#     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY  — anon/publishable key (RLS-protected)
+#     NEXT_PUBLIC_APP_URL                   — public site URL
+#
+#   Secrets like SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY, RESEND_API_KEY, etc.
+#   are NEVER inlined (they lack the NEXT_PUBLIC_ prefix), so they are still
+#   scanned and blocked if they ever leak into the build output.
+# ═══════════════════════════════════════════════════════════════════════════
+
 [build.environment]
   NODE_VERSION = "20"
   NEXT_TELEMETRY_DISABLED = "1"
   NPM_FLAGS = "--legacy-peer-deps"
+  SECRETS_SCAN_ENABLED = "true"
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,NEXT_PUBLIC_APP_URL"
 
 # ─── Next.js runtime ─────────────────────────────────────────────────────
-# The plugin is mandatory. Without it, Netlify treats this as a static
-# site, ignores .next/server/*, and returns 404 for every route.
-#
-# Netlify also auto-detects this plugin when Next.js is present, but
-# declaring it explicitly guarantees the runtime is applied even if
-# auto-detection changes.
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
@@ -28,17 +48,11 @@
 # HEADERS
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Immutable Next.js build assets — safe to cache for a year.
+# Immutable Next.js build assets — cache for a year.
 [[headers]]
   for = "/_next/static/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
-
-# Favicon — moderate cache.
-[[headers]]
-  for = "/favicon.ico"
-  [headers.values]
-    Cache-Control = "public, max-age=86400"
 
 # Next.js image optimizer output.
 [[headers]]
@@ -46,11 +60,24 @@
   [headers.values]
     Cache-Control = "public, max-age=60, stale-while-revalidate=86400"
 
-# API routes — never cached.
+# Favicon — moderate cache.
+[[headers]]
+  for = "/favicon.ico"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+# API routes — never cache.
 [[headers]]
   for = "/api/*"
   [headers.values]
     Cache-Control = "no-store, max-age=0"
+
+# PWA manifest — short cache, must be re-validated.
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+    Content-Type = "application/manifest+json"
 
 # Global security headers.
 [[headers]]

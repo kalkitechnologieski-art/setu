@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════
-#  D:\setu\fix-final.sh
-#  Final cleanup: metadata URLs + orphaned auth forms
+#  D:\setu\fix-netlify-secrets.sh
+#  Fix Netlify build failure: secrets scanner flags public NEXT_PUBLIC_* vars
 #  IDEMPOTENT · ATOMIC · BACKUP-SAFE · MSYS2-SAFE · HEREDOC-SAFE
 # ═══════════════════════════════════════════════════════════════════════════
 set -Eeuo pipefail
@@ -13,14 +13,13 @@ IFS=$'\n\t'
 readonly REPO_DIR="/d/setu"
 readonly APP_DIR="${REPO_DIR}/app"
 readonly LIB_DIR="${REPO_DIR}/lib"
-readonly COMP_DIR="${REPO_DIR}/components"
 readonly GIT_REMOTE="https://github.com/kalkitechnologieski-art/setu.git"
 
 readonly STATE_HOME="${HOME}/.setu"
 readonly LOG_HOME="${STATE_HOME}/logs"
 readonly TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-readonly LOG_TMP="${LOG_HOME}/fix-final-${TIMESTAMP}.log"
-readonly BACKUP_ROOT="${STATE_HOME}/fix-final-backups"
+readonly LOG_TMP="${LOG_HOME}/fix-netlify-secrets-${TIMESTAMP}.log"
+readonly BACKUP_ROOT="${STATE_HOME}/fix-netlify-secrets-backups"
 readonly SNAPSHOT="${TIMESTAMP}"
 
 mkdir -p "$STATE_HOME" "$LOG_HOME" "$BACKUP_ROOT/$SNAPSHOT"
@@ -88,199 +87,527 @@ write_file() {
   ok "Wrote: ${target#"$REPO_DIR"/} ($(wc -l < "$target" | tr -d ' ') lines)"
 }
 
-safe_delete() {
-  local target="$1"
-  [ -e "$target" ] || return 0
-  if [ "$DRY" -eq 1 ]; then dim "DRY: would delete ${target#"$REPO_DIR"/}"; return 0; fi
-  [ -f "$target" ] && backup "$target"
-  rm -rf "$target"
-  ok "Deleted: ${target#"$REPO_DIR"/}"
-}
-
-ban "FINAL CLEANUP — METADATA + ORPHANED FORMS"
+ban "FIX NETLIFY SECRETS SCANNER"
 log "Repo:   $REPO_DIR"
 log "Backup: ${BACKUP_ROOT}/${SNAPSHOT}"
 hr
 
 cd "$REPO_DIR"
 [ -f package.json ] || die "Missing package.json"
-[ -d node_modules ] || die "Missing node_modules"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 1 — Fix app/robots.ts
+# STEP 1 — Diagnose
 # ═══════════════════════════════════════════════════════════════════════════
-ban "STEP 1 — app/robots.ts"
+ban "1. Diagnose"
 
-write_file "${APP_DIR}/robots.ts" <<'ROBOTS_EOF'
-import type { MetadataRoute } from "next";
-
-/**
- * Resolve the site origin at request time. In production, NEXT_PUBLIC_APP_URL
- * is the canonical Netlify URL. In dev or preview environments without that
- * env var, fall back to the current deployment's own origin — never a
- * hardcoded third-party domain.
- */
-function resolveBaseUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_APP_URL;
-  if (configured && configured !== "__SET_ME__") {
-    return configured.replace(/\/$/, "");
-  }
-  // Netlify injects URL at build time
-  if (process.env.URL) return process.env.URL.replace(/\/$/, "");
-  if (process.env.DEPLOY_PRIME_URL) {
-    return process.env.DEPLOY_PRIME_URL.replace(/\/$/, "");
-  }
-  return "http://localhost:3000";
-}
-
-export default function robots(): MetadataRoute.Robots {
-  const base = resolveBaseUrl();
-  return {
-    rules: [
-      {
-        userAgent: "*",
-        allow: ["/", "/login", "/signup"],
-        disallow: [
-          "/dashboard", "/inbox", "/workforce", "/leads", "/campaigns",
-          "/performance", "/signals", "/calls", "/analytics", "/workflows",
-          "/approvals", "/settings", "/ops", "/connect",
-          "/api/", "/callback", "/onboarding", "/verify",
-          "/forgot-password", "/reset-password",
-        ],
-      },
-    ],
-    sitemap: `${base}/sitemap.xml`,
-    host: base,
-  };
-}
-ROBOTS_EOF
-
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 2 — Fix app/sitemap.ts
-# ═══════════════════════════════════════════════════════════════════════════
-ban "STEP 2 — app/sitemap.ts"
-
-write_file "${APP_DIR}/sitemap.ts" <<'SITEMAP_EOF'
-import type { MetadataRoute } from "next";
-
-function resolveBaseUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_APP_URL;
-  if (configured && configured !== "__SET_ME__") {
-    return configured.replace(/\/$/, "");
-  }
-  if (process.env.URL) return process.env.URL.replace(/\/$/, "");
-  if (process.env.DEPLOY_PRIME_URL) {
-    return process.env.DEPLOY_PRIME_URL.replace(/\/$/, "");
-  }
-  return "http://localhost:3000";
-}
-
-export default function sitemap(): MetadataRoute.Sitemap {
-  const base = resolveBaseUrl();
-  const now = new Date();
-  return [
-    { url: `${base}/`,       lastModified: now, changeFrequency: "weekly",  priority: 1.0 },
-    { url: `${base}/login`,  lastModified: now, changeFrequency: "monthly", priority: 0.5 },
-    { url: `${base}/signup`, lastModified: now, changeFrequency: "monthly", priority: 0.6 },
-  ];
-}
-SITEMAP_EOF
-
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 3 — Delete orphaned auth forms (superseded by new names)
-# ═══════════════════════════════════════════════════════════════════════════
-ban "STEP 3 — Remove orphaned auth files"
-
-sub "Scanning for imports that reference the old auth API"
-OLD_API_HITS=0
-while IFS= read -r f; do
-  [ -f "$f" ] || continue
-  if grep -qE "signInWithPassword|signUpWithPassword|AuthResult.*@/app/actions/auth" "$f" 2>/dev/null; then
-    warn "Uses old auth API: ${f#"$REPO_DIR"/}"
-    grep -nE "signInWithPassword|signUpWithPassword|AuthResult.*@/app/actions/auth" "$f" | head -3 | sed 's/^/    /' | tee -a "$LOG_TMP"
-    OLD_API_HITS=$((OLD_API_HITS + 1))
-  fi
-done < <(find "$COMP_DIR" "$APP_DIR" -type f \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null)
-
-if [ "$OLD_API_HITS" -eq 0 ]; then
-  ok "No files reference the old auth API"
-fi
-
-sub "Deleting superseded auth forms"
-DELETE_LIST=(
-  "${COMP_DIR}/auth/login-form.tsx"
-  "${COMP_DIR}/auth/signup-form.tsx.old"
+sub "All env vars referenced in code"
+ENV_VARS_USED=()
+while IFS= read -r var; do
+  [ -n "$var" ] || continue
+  ENV_VARS_USED+=("$var")
+done < <(
+  grep -rohE "process\.env\.[A-Z_][A-Z0-9_]*" --include="*.ts" --include="*.tsx" \
+    "$APP_DIR" "$LIB_DIR" 2>/dev/null \
+    | sed 's/process\.env\.//' \
+    | sort -u
 )
 
-# These are the ones that exist in the current codebase and are superseded
-for target in "${DELETE_LIST[@]}"; do
-  if [ -f "$target" ]; then
-    case "$target" in
-      */login-form.tsx)
-        # Only delete if signin-form.tsx exists (the replacement)
-        if [ -f "${COMP_DIR}/auth/signin-form.tsx" ]; then
-          safe_delete "$target"
-        else
-          warn "Not deleting login-form.tsx — signin-form.tsx missing"
-        fi
-        ;;
-      *)
-        safe_delete "$target"
-        ;;
-    esac
+if [ "${#ENV_VARS_USED[@]}" -eq 0 ]; then
+  warn "No env vars found in code"
+else
+  log "Found ${#ENV_VARS_USED[@]} env vars referenced in code:"
+  for v in "${ENV_VARS_USED[@]}"; do
+    if [[ "$v" == NEXT_PUBLIC_* ]]; then
+      dim "  $v (public — inlined at build, safe to expose)"
+    else
+      dim "  $v (secret — must not appear in output)"
+    fi
+  done
+fi
+
+sub "NEXT_PUBLIC_* vars in current build (if .next exists)"
+if [ -d .next ]; then
+  PUBLIC_FOUND=$(grep -rlE "NEXT_PUBLIC_SUPABASE_URL|NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" .next 2>/dev/null | head -3 || true)
+  if [ -n "$PUBLIC_FOUND" ]; then
+    log "NEXT_PUBLIC_* values are inlined in:"
+    printf '%s\n' "$PUBLIC_FOUND" | while read -r f; do
+      dim "  ${f}"
+    done
+  else
+    ok "No NEXT_PUBLIC_* inlining found (clean build)"
   fi
-done
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 4 — Verify remaining Vercel couplings are gone
+# STEP 2 — Rewrite netlify.toml with SECRETS_SCAN_OMIT_KEYS
 # ═══════════════════════════════════════════════════════════════════════════
-ban "STEP 4 — Verify no Vercel couplings"
+ban "2. netlify.toml"
 
-SWEPT=0
-while IFS= read -r f; do
-  [ -f "$f" ] || continue
-  if grep -qE "vercel\.app|vercel\.com" "$f" 2>/dev/null; then
-    err "Still references Vercel: ${f#"$REPO_DIR"/}"
-    grep -nE "vercel\.app|vercel\.com" "$f" | head -3 | sed 's/^/    /' | tee -a "$LOG_TMP"
-    SWEPT=$((SWEPT + 1))
+write_file "${REPO_DIR}/netlify.toml" <<'NETLIFY_EOF'
+# ═══════════════════════════════════════════════════════════════════════════
+# Setu Kalki Intelligence — Netlify configuration
+# ═══════════════════════════════════════════════════════════════════════════
+# Next.js 15 App Router is fully supported on Netlify via the OpenNext
+# adapter (@netlify/plugin-nextjs v5+). Every feature is available:
+#   Server Components · Server Actions · Middleware · Route Handlers
+#   Streaming · ISR · Image Optimization · Revalidation
+# ═══════════════════════════════════════════════════════════════════════════
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BUILD ENVIRONMENT
+# ═══════════════════════════════════════════════════════════════════════════
+# SECRETS_SCAN_OMIT_KEYS
+#   Next.js INLINES every NEXT_PUBLIC_* variable at build time. Those values
+#   end up in client bundles and in edge function bundles — by design, since
+#   NEXT_PUBLIC_* vars are meant to be shipped to browsers.
+#
+#   Netlify's secrets scanner runs after every build and flags ANY env var
+#   value that appears in the output. It cannot distinguish public-by-design
+#   vars from true secrets, so we must explicitly whitelist the public ones.
+#
+#   These three values ARE public by design:
+#     NEXT_PUBLIC_SUPABASE_URL              — project URL, visible in browser
+#     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY  — anon/publishable key (RLS-protected)
+#     NEXT_PUBLIC_APP_URL                   — public site URL
+#
+#   Secrets like SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY, RESEND_API_KEY, etc.
+#   are NEVER inlined (they lack the NEXT_PUBLIC_ prefix), so they are still
+#   scanned and blocked if they ever leak into the build output.
+# ═══════════════════════════════════════════════════════════════════════════
+
+[build.environment]
+  NODE_VERSION = "20"
+  NEXT_TELEMETRY_DISABLED = "1"
+  NPM_FLAGS = "--legacy-peer-deps"
+  SECRETS_SCAN_ENABLED = "true"
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,NEXT_PUBLIC_APP_URL"
+
+# ─── Next.js runtime ─────────────────────────────────────────────────────
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HEADERS
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Immutable Next.js build assets — cache for a year.
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Next.js image optimizer output.
+[[headers]]
+  for = "/_next/image*"
+  [headers.values]
+    Cache-Control = "public, max-age=60, stale-while-revalidate=86400"
+
+# Favicon — moderate cache.
+[[headers]]
+  for = "/favicon.ico"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+# API routes — never cache.
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Cache-Control = "no-store, max-age=0"
+
+# PWA manifest — short cache, must be re-validated.
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+    Content-Type = "application/manifest+json"
+
+# Global security headers.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DEPLOY CONTEXTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+[context.production]
+  command = "npm run build"
+
+[context.deploy-preview]
+  command = "npm run build"
+
+[context.branch-deploy]
+  command = "npm run build"
+NETLIFY_EOF
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 3 — Harden middleware (make it obvious why NEXT_PUBLIC_* is inlined)
+# ═══════════════════════════════════════════════════════════════════════════
+ban "3. Middleware"
+
+write_file "${LIB_DIR}/supabase/middleware.ts" <<'MW_EOF'
+// lib/supabase/middleware.ts
+// ───────────────────────────────────────────────────────────────────────────
+// Session refresh + route protection for Next.js 15 App Router.
+//
+// ─── WHY THIS FILE TRIGGERS NETLIFY'S SECRETS SCANNER ──────────────────────
+// This middleware reads NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_
+// PUBLISHABLE_KEY. Next.js INLINES every NEXT_PUBLIC_* variable at build
+// time — the literal values end up in .netlify/edge-functions/**.
+//
+// Netlify's secrets scanner flags any env var value in build output and
+// cannot distinguish public-by-design vars from real secrets. The fix is
+// in netlify.toml:
+//
+//   SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,\
+//                             NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,\
+//                             NEXT_PUBLIC_APP_URL"
+//
+// These three values are already shipped to every browser that loads the
+// app — the publishable (anon) key is designed to be public. Data security
+// comes from Row Level Security policies, not from hiding this key.
+//
+// Server-only secrets (SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY, etc.) lack
+// the NEXT_PUBLIC_ prefix, are never inlined, and remain subject to the
+// scanner.
+// ───────────────────────────────────────────────────────────────────────────
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
+import type { Database } from "./types";
+
+const PROTECTED_PREFIXES = [
+  "/dashboard", "/inbox", "/workforce", "/leads", "/campaigns",
+  "/performance", "/signals", "/calls", "/analytics", "/workflows",
+  "/approvals", "/settings", "/connect", "/ops",
+];
+
+const AUTH_PAGES = new Set([
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+  "/verify",
+  "/onboarding",
+]);
+
+function isStaticAsset(pathname: string): boolean {
+  return /\.(?:ico|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|eot|webmanifest|txt|xml|json)$/i.test(
+    pathname
+  );
+}
+
+function isPublicMetadata(pathname: string): boolean {
+  return (
+    pathname === "/" ||
+    pathname === "/manifest.webmanifest" ||
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml" ||
+    pathname === "/favicon.ico" ||
+    pathname === "/diagnostics" ||
+    isStaticAsset(pathname)
+  );
+}
+
+export async function updateSession(request: NextRequest) {
+  let response = NextResponse.next({ request });
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+  // If Supabase is not configured, pass through with no auth checks.
+  // Pages still render; actions will return a friendly error.
+  if (!url || !key || url === "__SET_ME__" || key === "__SET_ME__") {
+    return response;
+  }
+
+  const supabase = createServerClient<Database>(url, key, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) =>
+          request.cookies.set(name, value)
+        );
+        response = NextResponse.next({ request });
+        cookiesToSet.forEach(({ name, value, options }) =>
+          response.cookies.set(name, value, {
+            ...options,
+            sameSite: "lax",
+            secure: process.env.NODE_ENV === "production",
+            httpOnly: true,
+            path: "/",
+            maxAge: 60 * 60 * 24 * 30,
+          })
+        );
+      },
+    },
+  });
+
+  // getUser() verifies the JWT signature (getSession() does not).
+  // If this throws, we log and pass through rather than crashing the
+  // entire page render.
+  let user = null;
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+  } catch (e) {
+    console.error("[middleware] getUser failed:", e);
+    return response;
+  }
+
+  const path = request.nextUrl.pathname;
+
+  // Never auth-protect static assets or metadata.
+  if (isPublicMetadata(path)) {
+    return response;
+  }
+
+  // Already-signed-in user on an auth page → dashboard.
+  if (user && AUTH_PAGES.has(path)) {
+    const redirect = request.nextUrl.clone();
+    redirect.pathname = "/dashboard";
+    redirect.search = "";
+    return NextResponse.redirect(redirect);
+  }
+
+  // Unauthenticated user on a protected route → login.
+  const isProtected = PROTECTED_PREFIXES.some((p) => path.startsWith(p));
+  if (!user && isProtected) {
+    const redirect = request.nextUrl.clone();
+    redirect.pathname = "/login";
+    redirect.searchParams.set("next", path);
+    return NextResponse.redirect(redirect);
+  }
+
+  return response;
+}
+MW_EOF
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 4 — Root middleware (unchanged matcher, cleaner comment)
+# ═══════════════════════════════════════════════════════════════════════════
+ban "4. Root middleware"
+
+write_file "${REPO_DIR}/middleware.ts" <<'MWROOT_EOF'
+// middleware.ts — Next.js 15 entry point.
+// On Next.js 16+, rename this file to proxy.ts and rename the export to
+// `proxy`. The matcher config exports as `config` in both cases.
+import { updateSession } from "@/lib/supabase/middleware";
+import type { NextRequest } from "next/server";
+
+export async function middleware(request: NextRequest) {
+  return await updateSession(request);
+}
+
+export const config = {
+  // Skip middleware for Next.js internals and static metadata.
+  // This is a performance optimization — it does NOT affect the secrets
+  // scanner, which operates on the compiled bundle regardless.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|robots.txt|sitemap.xml|icon|apple-icon|opengraph-image|twitter-image|.*\\.(?:svg|png|jpg|jpeg|gif|webp|woff2?|ttf|eot|txt|xml|webmanifest)$).*)",
+  ],
+};
+MWROOT_EOF
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 5 — Update .env.example with the fix documentation
+# ═══════════════════════════════════════════════════════════════════════════
+ban "5. .env.example"
+
+if [ -f "${REPO_DIR}/.env.example" ]; then
+  ENV_EXAMPLE="${REPO_DIR}/.env.example"
+  if ! grep -q "SECRETS_SCAN_OMIT_KEYS" "$ENV_EXAMPLE" 2>/dev/null; then
+    if [ "$DRY" -eq 0 ]; then
+      backup "$ENV_EXAMPLE"
+      cat >> "$ENV_EXAMPLE" <<'ENV_APPEND'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Netlify — Secrets Scanner Configuration
+# ═══════════════════════════════════════════════════════════════════════════
+# Next.js inlines every NEXT_PUBLIC_* variable at build time. Netlify's
+# scanner flags those values in build output because it cannot distinguish
+# public-by-design vars from real secrets. This whitelist tells the scanner
+# to skip the three public values while still scanning everything else.
+#
+# Configured in netlify.toml under [build.environment]. If you deploy via
+# the Netlify UI, add the same variable to Site configuration →
+# Build & deploy → Environment variables:
+#
+#   SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,NEXT_PUBLIC_APP_URL"
+#
+# These values are safe to expose — the publishable key is designed to be
+# shipped to browsers, and RLS policies enforce data access at the database.
+ENV_APPEND
+      ok "Appended SECRETS_SCAN_OMIT_KEYS docs to .env.example"
+    fi
+  else
+    ok "SKIP (.env.example already documents SECRETS_SCAN_OMIT_KEYS)"
   fi
-done < <(find "$APP_DIR" "$LIB_DIR" "$COMP_DIR" -type f \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null)
-
-[ "$SWEPT" -eq 0 ] && ok "No Vercel couplings remain" || die "$SWEPT file(s) still reference Vercel"
+else
+  warn ".env.example not found"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 5 — Verify: typecheck + build
+# STEP 6 — Add DEPLOY.md section explaining the fix
+# ═══════════════════════════════════════════════════════════════════════════
+ban "6. DEPLOY.md"
+
+if [ -f "${REPO_DIR}/DEPLOY.md" ]; then
+  DEPLOY_MD="${REPO_DIR}/DEPLOY.md"
+  if ! grep -q "SECRETS_SCAN_OMIT_KEYS" "$DEPLOY_MD" 2>/dev/null; then
+    if [ "$DRY" -eq 0 ]; then
+      backup "$DEPLOY_MD"
+      cat >> "$DEPLOY_MD" <<'DEPLOY_APPEND'
+
+---
+
+## Netlify Secrets Scanner
+
+Netlify's build pipeline runs a secrets scanner after every build. It
+searches the compiled output for the literal values of every environment
+variable. If a value is found, the build fails:
+
+    Secrets scanning found secrets in build.
+    Secret env var "NEXT_PUBLIC_SUPABASE_URL"'s value detected:
+      found value at line 110 in .netlify/edge-functions/...
+      /___netlify-edge-handler-middleware/server/middleware.js
+
+### Why this happens
+
+Next.js **inlines every `NEXT_PUBLIC_*` variable** at build time. The
+values end up inside client bundles and inside the middleware edge
+function. That's by design — those variables are meant to be shipped to
+browsers.
+
+Netlify's scanner cannot distinguish public-by-design variables from true
+secrets. It flags any env var value it finds in build output.
+
+### The fix
+
+`netlify.toml` includes a whitelist of the three public variables:
+
+    [build.environment]
+      SECRETS_SCAN_ENABLED = "true"
+      SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,NEXT_PUBLIC_APP_URL"
+
+The scanner still runs — it just ignores those specific keys. Real secrets
+(SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY, RESEND_API_KEY, AGENTCALL_API_KEY,
+MARKIFACT_API_KEY, LANGSMITH_API_KEY, CRON_SECRET, GOOGLE_ADS_CLIENT_SECRET,
+META_ADS_CLIENT_SECRET) do not have the NEXT_PUBLIC_ prefix, are never
+inlined, and remain fully subject to the scanner.
+
+### If you deploy via Netlify UI
+
+The same variable can be set manually:
+
+**Site configuration → Build & deploy → Environment variables:**
+
+    SECRETS_SCAN_OMIT_KEYS = NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,NEXT_PUBLIC_APP_URL
+
+Then trigger **Deploys → Trigger deploy → Clear cache and deploy site**.
+
+### Other scanner controls
+
+| Variable | Purpose |
+|---|---|
+| `SECRETS_SCAN_ENABLED` | Set to `"false"` to disable scanning entirely (not recommended) |
+| `SECRETS_SCAN_OMIT_KEYS` | Comma-separated env var **names** to skip |
+| `SECRETS_SCAN_OMIT_PATHS` | Glob patterns of file paths to skip |
+| `SECRETS_SCAN_SMART_DETECTION_ENABLED` | Set to `"false"` to disable heuristic detection |
+
+Use `SECRETS_SCAN_OMIT_KEYS` — never disable scanning globally.
+DEPLOY_APPEND
+      ok "Appended secrets scanner section to DEPLOY.md"
+    fi
+  else
+    ok "SKIP (DEPLOY.md already documents SECRETS_SCAN_OMIT_KEYS)"
+  fi
+else
+  warn "DEPLOY.md not found"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 7 — Validate netlify.toml is parseable
+# ═══════════════════════════════════════════════════════════════════════════
+ban "7. Validate netlify.toml"
+
+if [ "$DRY" -eq 0 ]; then
+  NETLIFY_TOML="${REPO_DIR}/netlify.toml"
+
+  sub "Required sections"
+  for pattern in \
+    '\[build\]' \
+    'command = "npm run build"' \
+    'publish = ".next"' \
+    'SECRETS_SCAN_OMIT_KEYS' \
+    'NEXT_PUBLIC_SUPABASE_URL' \
+    'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY' \
+    'NEXT_PUBLIC_APP_URL' \
+    '@netlify/plugin-nextjs'; do
+    if grep -q "$pattern" "$NETLIFY_TOML" 2>/dev/null; then
+      ok "  $pattern"
+    else
+      err "  MISSING: $pattern"
+      exit 1
+    fi
+  done
+
+  sub "Netlify secrets to keep scanning"
+  for secret in SUPABASE_SERVICE_ROLE_KEY GROQ_API_KEY RESEND_API_KEY; do
+    if grep -qE "SECRETS_SCAN_OMIT_KEYS.*${secret}" "$NETLIFY_TOML" 2>/dev/null; then
+      err "  $secret is in the omit list — remove it, it is a real secret"
+      exit 1
+    fi
+  done
+  ok "Real secrets are NOT in the omit list"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 8 — Verify build locally
 # ═══════════════════════════════════════════════════════════════════════════
 if [ "$SKIPVERIFY" -eq 0 ] && [ "$DRY" -eq 0 ]; then
-  ban "STEP 5 — Verify"
+  ban "8. Verify"
 
   sub "tsc --noEmit"
-  TSC_LOG="${LOG_HOME}/tsc-final-${TIMESTAMP}.log"
+  TSC_LOG="${LOG_HOME}/tsc-secrets-${TIMESTAMP}.log"
   if npx tsc --noEmit > "$TSC_LOG" 2>&1; then
     ok "TypeScript: PASS"
   else
-    err "TypeScript: FAIL — see $TSC_LOG"
+    err "TypeScript: FAIL"
     awk '/error TS/ && NR<=30 { print "    " $0 }' "$TSC_LOG"
     exit 1
   fi
 
   sub "next build"
-  BUILD_LOG="${LOG_HOME}/build-final-${TIMESTAMP}.log"
+  BUILD_LOG="${LOG_HOME}/build-secrets-${TIMESTAMP}.log"
   if npm run build > "$BUILD_LOG" 2>&1; then
     ok "Build: PASS"
-    awk '/^(Route|├|└|○|ƒ)/ && n<60 { print "  " $0; n++ }' "$BUILD_LOG" || true
+
+    sub "Sanity: NEXT_PUBLIC_* inlining (expected)"
+    INLINED=$(grep -rl "NEXT_PUBLIC_SUPABASE_URL" .next 2>/dev/null | wc -l | tr -d ' ')
+    log "  $INLINED file(s) in .next/ contain the NEXT_PUBLIC_* identifier"
+    log "  (Expected — this is why SECRETS_SCAN_OMIT_KEYS is required)"
   else
     err "Build: FAIL"
-    awk 'NR<=50 { print "    " $0 }' "$BUILD_LOG"
+    awk 'NR<=60 { print "    " $0 }' "$BUILD_LOG"
     exit 1
   fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 6 — Commit + push
+# STEP 9 — Commit + push
 # ═══════════════════════════════════════════════════════════════════════════
 if [ "$NOPUSH" -eq 0 ] && [ "$DRY" -eq 0 ]; then
-  ban "STEP 6 — Commit + push"
+  ban "9. Commit + push"
 
   git config user.email >/dev/null 2>&1 || git config user.email "kalkitechnologieski@gmail.com"
   git config user.name  >/dev/null 2>&1 || git config user.name  "Setu Kalki"
@@ -293,17 +620,28 @@ if [ "$NOPUSH" -eq 0 ] && [ "$DRY" -eq 0 ]; then
   if git diff --cached --quiet 2>/dev/null; then
     ok "No changes to commit"
   else
-    git commit -q -m "Fix metadata URLs + remove orphaned auth forms
+    git commit -q -m "Fix Netlify secrets scanner blocking the build
 
-Changes:
-  • app/robots.ts — read NEXT_PUBLIC_APP_URL or Netlify's URL env at runtime,
-    no more hardcoded setu-kalki.vercel.app fallback
-  • app/sitemap.ts — same runtime resolution
-  • Removed components/auth/login-form.tsx — superseded by signin-form.tsx;
-    it imported signInWithPassword/AuthResult from old @/app/actions/auth
-    which was replaced in the Supabase Auth rewrite
+Root cause:
+  Next.js inlines every NEXT_PUBLIC_* variable at build time. The values
+  of NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  appear in .netlify/edge-functions/**/middleware.js. Netlify's secrets
+  scanner cannot distinguish public-by-design vars from real secrets and
+  failed the build with exit code 2.
 
-Verified: tsc --noEmit + next build both pass."
+Fix:
+  • netlify.toml — added SECRETS_SCAN_OMIT_KEYS with the three public vars
+    (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+    NEXT_PUBLIC_APP_URL). Scanning remains enabled for real secrets like
+    SUPABASE_SERVICE_ROLE_KEY, GROQ_API_KEY, RESEND_API_KEY.
+
+  • lib/supabase/middleware.ts — comprehensive JSDoc explaining why the
+    NEXT_PUBLIC_* inlining is intentional and why the whitelist exists.
+
+  • .env.example — documented SECRETS_SCAN_OMIT_KEYS.
+
+  • DEPLOY.md — new section on Netlify secrets scanner."
+
     ok "Committed"
   fi
 
@@ -319,7 +657,7 @@ Verified: tsc --noEmit + next build both pass."
   git push origin main >/dev/null 2>&1 || PUSH_OK=0
 
   if [ "$PUSH_OK" -eq 0 ]; then
-    warn "Push rejected — rebasing"
+    warn "Push rejected — attempting rebase"
     if git pull --rebase origin main >/dev/null 2>&1; then
       git push origin main >/dev/null 2>&1 && PUSH_OK=1
     fi
@@ -333,13 +671,25 @@ Verified: tsc --noEmit + next build both pass."
   fi
 fi
 
-ban "FIX COMPLETE"
-ok "robots.ts:      reads NEXT_PUBLIC_APP_URL"
-ok "sitemap.ts:     reads NEXT_PUBLIC_APP_URL"
-ok "Orphaned files: removed"
-ok "Vercel refs:    0 remaining"
-[ "$SKIPVERIFY" -eq 0 ] && ok "TypeScript:    PASS"
-[ "$SKIPVERIFY" -eq 0 ] && ok "Build:         PASS"
-[ "$NOPUSH" -eq 0 ] && ok "Pushed:        origin/main"
+ban "NETLIFY SECRETS FIX COMPLETE"
+
+ok "netlify.toml:     SECRETS_SCAN_OMIT_KEYS whitelist"
+ok "Middleware:       documented NEXT_PUBLIC_* inlining"
+ok ".env.example:     whitelist documented"
+ok "DEPLOY.md:        secrets scanner section"
+[ "$SKIPVERIFY" -eq 0 ] && ok "TypeScript:       PASS"
+[ "$SKIPVERIFY" -eq 0 ] && ok "Build:            PASS"
+[ "$NOPUSH" -eq 0 ] && ok "Pushed:           origin/main"
+
 ok "Backup: ${BACKUP_ROOT}/${SNAPSHOT}"
+ok "Log:    $LOG_TMP"
+
+printf '\n%sWhat happens next:%s\n' "$BLD" "$R"
+printf '  1. Netlify detects the push and rebuilds in ~90s\n'
+printf '  2. The scanner runs — NEXT_PUBLIC_* values are ignored\n'
+printf '  3. Real secrets (SERVICE_ROLE_KEY, GROQ_API_KEY) are still scanned\n'
+printf '  4. Build succeeds → deploy publishes\n'
+printf '\n%sVerify after deploy:%s\n' "$BLD" "$R"
+printf '  curl -sI https://steady-croissant-9cbbbf.netlify.app/manifest.webmanifest | head -3\n'
+printf '  curl -s  https://steady-croissant-9cbbbf.netlify.app/api/health | jq\n'
 hr
