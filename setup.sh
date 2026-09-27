@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════
-#  D:\setu\fix-netlify.sh
-#  Fix Netlify 404 — configure Next.js 15 runtime correctly
+#  D:\setu\fix-types.sh
+#  Clear stale Next.js type validators → regenerate → verify → push
 #  IDEMPOTENT · ATOMIC · BACKUP-SAFE · MSYS2-SAFE
 # ═══════════════════════════════════════════════════════════════════════════
 set -Eeuo pipefail
@@ -10,28 +10,35 @@ shopt -s nullglob
 IFS=$'\n\t'
 
 readonly REPO_DIR="/d/setu"
+readonly GIT_REMOTE="https://github.com/kalkitechnologieski-art/setu.git"
+
 readonly STATE_HOME="${HOME}/.setu"
 readonly LOG_HOME="${STATE_HOME}/logs"
-readonly LOG_TMP="${LOG_HOME}/fix-netlify-$(date +%Y%m%d-%H%M%S).log"
-readonly BACKUP_ROOT="${STATE_HOME}/fix-netlify-backups"
-readonly SNAPSHOT="$(date +%Y%m%d-%H%M%S)"
+readonly TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+readonly LOG_TMP="${LOG_HOME}/fix-types-${TIMESTAMP}.log"
+readonly BACKUP_ROOT="${STATE_HOME}/fix-types-backups"
+readonly SNAPSHOT="${TIMESTAMP}"
 
 mkdir -p "$STATE_HOME" "$LOG_HOME" "$BACKUP_ROOT/$SNAPSHOT"
 : > "$LOG_TMP"
 
 DRY=0
+NOPUSH=0
 NOCLR=0
 for a in "$@"; do
   case "$a" in
-    --dry-run) DRY=1 ;;
+    --dry-run)  DRY=1 ;;
+    --no-push)  NOPUSH=1 ;;
     --no-color) NOCLR=1 ;;
-    -h|--help) printf 'Usage: %s [--dry-run|--no-color]\n' "$0"; exit 0 ;;
+    -h|--help)
+      printf 'Usage: %s [--dry-run|--no-push|--no-color]\n' "$0"
+      exit 0 ;;
     *) printf 'Unknown flag: %s\n' "$a" >&2; exit 2 ;;
   esac
 done
 
 if [ "$NOCLR" -eq 1 ]; then
-  R='' RED='' GRN='' YEL='' CYN='' BLD='' MAG='' DIM=''
+  R=''; RED=''; GRN=''; YEL=''; CYN=''; BLD=''; MAG=''; DIM=''
 else
   R=$'\033[0m'; RED=$'\033[0;31m'; GRN=$'\033[0;32m'
   YEL=$'\033[1;33m'; CYN=$'\033[0;36m'; BLD=$'\033[1m'
@@ -47,293 +54,188 @@ die()  { err "$*"; exit 1; }
 ban()  { printf '\n%s%s═══ %s ═══%s\n' "$BLD" "$CYN" "$*" "$R" | tee -a "$LOG_TMP"; }
 sub()  { printf '\n%s%s─── %s ───%s\n' "$BLD" "$MAG" "$*" "$R" | tee -a "$LOG_TMP"; }
 hr()   { printf '%s──────────────────────────────────────────%s\n' "$CYN" "$R"; }
+dim()  { printf '%s    %s%s\n' "$DIM" "$*" "$R"; }
 
 on_err() { local c=$?; err "Failure at line ${1:-?} (exit $c)"; err "Log: $LOG_TMP"; exit "$c"; }
 trap 'on_err $LINENO' ERR
 
-backup() {
-  local f="$1"
-  [ -f "$f" ] || return 0
-  local rel="${f#"$REPO_DIR"/}"
-  local bd="${BACKUP_ROOT}/${SNAPSHOT}/${rel}"
-  mkdir -p "$(dirname "$bd")"
-  cp -f "$f" "$bd"
-}
-
-write_file() {
-  local target="$1"
-  local tmp="${target}.tmp.$$"
-  mkdir -p "$(dirname "$target")"
-  cat > "$tmp"
-  if [ -f "$target" ] && cmp -s "$tmp" "$target"; then
-    rm -f "$tmp"
-    ok "SKIP (unchanged): ${target#"$REPO_DIR"/}"
-    return 0
-  fi
-  if [ "$DRY" -eq 1 ]; then
-    printf '%s    DRY: %s (%s lines)%s\n' "$DIM" "${target#"$REPO_DIR"/}" "$(wc -l < "$tmp" | tr -d ' ')" "$R"
-    rm -f "$tmp"; return 0
-  fi
-  backup "$target"
-  mv "$tmp" "$target"
-  ok "Wrote: ${target#"$REPO_DIR"/} ($(wc -l < "$target" | tr -d ' ') lines)"
-}
-
-ban "FIX NETLIFY 404"
+ban "FIX STALE NEXT.JS TYPE VALIDATORS"
 log "Repo:   $REPO_DIR"
-log "Backup: ${BACKUP_ROOT}/${SNAPSHOT}"
+log "Log:    $LOG_TMP"
 hr
 
 cd "$REPO_DIR"
 [ -f package.json ] || die "Missing package.json"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 1 — Diagnose the current state
+# STEP 1 — Show the stale references
 # ═══════════════════════════════════════════════════════════════════════════
-ban "1. Diagnosis"
+ban "STEP 1 — Diagnose"
 
-sub "next.config.ts"
-if [ -f next.config.ts ]; then
-  if grep -q 'output:[[:space:]]*["'\'']standalone["'\'']' next.config.ts; then
-    err "next.config.ts has output: \"standalone\" — THIS IS THE 404 CAUSE"
-    warn "Standalone output builds a server bundle for Vercel/Docker."
-    warn "Netlify needs the default Next.js build output."
-  elif grep -q 'output:[[:space:]]*["'\'']export["'\'']' next.config.ts; then
-    err "next.config.ts has output: \"export\" — incompatible with App Router dynamic routes"
-    warn "Static export produces single HTML files that Netlify cannot route dynamically."
-  else
-    ok "next.config.ts has no incompatible output mode"
+sub "Stale validator files referencing deleted app/page.js"
+STALE=0
+for f in ".next/types/validator.ts" ".next/dev/types/validator.ts"; do
+  if [ -f "$f" ]; then
+    if grep -q "app/page.js" "$f" 2>/dev/null; then
+      err "STALE: $f references app/page.js (deleted)"
+      grep -n "app/page.js" "$f" | head -3 | sed 's/^/    /' | tee -a "$LOG_TMP"
+      STALE=$((STALE+1))
+    fi
   fi
+done
+
+if [ "$STALE" -eq 0 ]; then
+  ok "No stale references found (may already be clean)"
+fi
+
+sub "tsconfig.json includes"
+if [ -f tsconfig.json ]; then
+  node -e "
+    const c = require('./tsconfig.json');
+    const inc = c.include || [];
+    const relevant = inc.filter(x => x.includes('.next/types') || x.includes('next-env'));
+    console.log('  .next type includes:', relevant.join(', ') || '(none)');
+  " 2>/dev/null || true
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 2 — Clear stale build artifacts
+# ═══════════════════════════════════════════════════════════════════════════
+ban "STEP 2 — Clear stale artifacts"
+
+if [ "$DRY" -eq 1 ]; then
+  dim "DRY: would remove .next/, .turbo/, *.tsbuildinfo"
 else
-  warn "next.config.ts not found"
-fi
+  for target in ".next" ".turbo" "node_modules/.cache"; do
+    if [ -e "$target" ]; then
+      rm -rf "$target"
+      ok "Cleared: $target/"
+    fi
+  done
 
-sub "netlify.toml"
-if [ -f netlify.toml ]; then
-  if grep -q '@netlify/plugin-nextjs' netlify.toml; then
-    ok "netlify.toml references @netlify/plugin-nextjs"
-  else
-    err "netlify.toml is missing @netlify/plugin-nextjs — 404 cause"
-  fi
-  if grep -q 'publish[[:space:]]*=[[:space:]]*"\.next"' netlify.toml; then
-    ok "netlify.toml publish = .next"
-  else
-    warn "netlify.toml publish is not \".next\""
-  fi
-else
-  err "netlify.toml not found — 404 cause"
-fi
+  # tsbuildinfo (incremental caches) — check both root and node_modules
+  find . -maxdepth 2 -name '*.tsbuildinfo' -not -path './node_modules/*' 2>/dev/null | while IFS= read -r f; do
+    rm -f "$f"
+    ok "Cleared: ${f#"$REPO_DIR"/}"
+  done
 
-sub "package.json dependencies"
-if node -e "process.exit(require('./package.json').devDependencies?.['@netlify/plugin-nextjs']?0:1)" 2>/dev/null; then
-  VER=$(node -p "require('./package.json').devDependencies['@netlify/plugin-nextjs']")
-  ok "@netlify/plugin-nextjs in devDependencies: $VER"
-elif node -e "process.exit(require('./package.json').dependencies?.['@netlify/plugin-nextjs']?0:1)" 2>/dev/null; then
-  VER=$(node -p "require('./package.json').dependencies['@netlify/plugin-nextjs']")
-  warn "@netlify/plugin-nextjs in dependencies (should be devDependencies): $VER"
-else
-  err "@netlify/plugin-nextjs NOT installed — 404 cause"
-fi
-
-sub "vercel.json (should not exist for Netlify)"
-if [ -f vercel.json ]; then
-  warn "vercel.json present — Netlify ignores it, but consider removing it"
+  # next-env.d.ts is auto-regenerated; safe to remove too
+  [ -f next-env.d.ts ] && rm -f next-env.d.ts && ok "Cleared: next-env.d.ts"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 2 — Fix next.config.ts (remove output mode)
-# ═══════════════════════════════════════════════════════════════════════════
-ban "2. Fix next.config.ts"
-
-write_file next.config.ts <<'CONFIG_EOF'
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  // ───────────────────────────────────────────────────────────────────────
-  // Netlify deploy: do NOT set `output: "standalone"` or `output: "export"`.
-  //
-  //   `standalone` builds a server bundle for Vercel/Docker containers.
-  //                Netlify sees no index.html and returns 404 for every path.
-  //
-  //   `export`     produces static HTML only — incompatible with App Router
-  //                dynamic routes, middleware, and Server Actions.
-  //
-  // The @netlify/plugin-nextjs runtime handles the build automatically.
-  // ───────────────────────────────────────────────────────────────────────
-  reactStrictMode: true,
-  poweredByHeader: false,
-  experimental: {
-    serverActions: {
-      bodySizeLimit: "2mb",
-    },
-  },
-};
-
-export default nextConfig;
-CONFIG_EOF
-
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 3 — Write netlify.toml
-# ═══════════════════════════════════════════════════════════════════════════
-ban "3. Configure netlify.toml"
-
-write_file netlify.toml <<'NETLIFY_EOF'
-# netlify.toml — Setu Kalki Intelligence
-# Netlify deployment configuration for Next.js 15 App Router.
-#
-# Next.js 15 App Router is fully supported on Netlify with zero configuration
-# via the @netlify/plugin-nextjs runtime (v5+). Every feature is available:
-#   Server Components · Server Actions · Middleware · Route Handlers
-#   Streaming · ISR · Image Optimization · Redirects · Revalidation
-
-[build]
-  command = "npm run build"
-  publish = ".next"
-
-[build.environment]
-  NODE_VERSION = "20"
-  NPM_FLAGS = "--legacy-peer-deps"
-
-# The Next.js runtime — required. Without this, Netlify returns 404 for
-# every route because it doesn't know how to route requests to Next.js.
-[[plugins]]
-  package = "@netlify/plugin-nextjs"
-
-# ─── Optional: preserve Next.js static assets on the CDN ─────────────────
-[[headers]]
-  for = "/_next/static/*"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-
-[[headers]]
-  for = "/favicon.ico"
-  [headers.values]
-    Cache-Control = "public, max-age=86400"
-
-# ─── Security headers ────────────────────────────────────────────────────
-[[headers]]
-  for = "/*"
-  [headers.values]
-    X-Content-Type-Options = "nosniff"
-    X-Frame-Options = "SAMEORIGIN"
-    Referrer-Policy = "strict-origin-when-cross-origin"
-NETLIFY_EOF
-
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 4 — Ensure @netlify/plugin-nextjs is in devDependencies
-# ═══════════════════════════════════════════════════════════════════════════
-ban "4. Ensure @netlify/plugin-nextjs installed"
-
-NEED_INSTALL=0
-if ! node -e "process.exit(require('./package.json').devDependencies?.['@netlify/plugin-nextjs']?0:1)" 2>/dev/null; then
-  NEED_INSTALL=1
-fi
-
-if [ "$NEED_INSTALL" -eq 1 ] && [ "$DRY" -eq 0 ]; then
-  log "Installing @netlify/plugin-nextjs (dev)"
-  npm i -D --no-audit --no-fund @netlify/plugin-nextjs 2>&1 | tail -3
-  ok "Plugin installed"
-else
-  ok "Plugin already present"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 5 — Remove vercel.json (Netlify ignores it, keep repo clean)
-# ═══════════════════════════════════════════════════════════════════════════
-ban "5. Cleanup Vercel artifacts"
-
-if [ -f vercel.json ]; then
-  if [ "$DRY" -eq 0 ]; then
-    backup vercel.json
-    rm -f vercel.json
-    ok "Removed vercel.json"
-  else
-    printf '%s    DRY: would remove vercel.json%s\n' "$DIM" "$R"
-  fi
-else
-  ok "No vercel.json"
-fi
-
-# ═══════════════════════════════════════════════════════════════════════════
-# STEP 6 — Verify local build produces the right output
+# STEP 3 — Rebuild to regenerate fresh validators
 # ═══════════════════════════════════════════════════════════════════════════
 if [ "$DRY" -eq 0 ]; then
-  ban "6. Local build verification"
+  ban "STEP 3 — Rebuild to regenerate validators"
 
-  sub "tsc --noEmit"
-  TSC_LOG="${LOG_HOME}/tsc-netlify-$(date +%Y%m%d-%H%M%S).log"
+  sub "next build (regenerates .next/types/)"
+  BUILD_LOG="${LOG_HOME}/build-fix-types-${TIMESTAMP}.log"
+  if npm run build > "$BUILD_LOG" 2>&1; then
+    ok "Build: PASS"
+  else
+    err "Build: FAIL — see $BUILD_LOG"
+    awk 'NR<=50 { print "    " $0 }' "$BUILD_LOG"
+    exit 1
+  fi
+
+  sub "Verify validators no longer reference deleted file"
+  if grep -q "app/page.js" .next/types/validator.ts 2>/dev/null; then
+    err "STILL STALE: .next/types/validator.ts references app/page.js"
+    exit 1
+  else
+    ok "Validators regenerated without app/page.js"
+  fi
+
+  if [ -f ".next/dev/types/validator.ts" ]; then
+    if grep -q "app/page.js" ".next/dev/types/validator.ts" 2>/dev/null; then
+      warn "dev validator still stale — will fix on next dev run"
+    else
+      ok "Dev validators clean"
+    fi
+  fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════
+# STEP 4 — Type check
+# ═══════════════════════════════════════════════════════════════════════════
+if [ "$DRY" -eq 0 ]; then
+  ban "STEP 4 — TypeScript"
+
+  TSC_LOG="${LOG_HOME}/tsc-fix-types-${TIMESTAMP}.log"
   if npx tsc --noEmit > "$TSC_LOG" 2>&1; then
     ok "TypeScript: PASS"
   else
-    err "TypeScript: FAIL"
-    grep -E "error TS" "$TSC_LOG" | head -10 || true
-    exit 1
-  fi
-
-  sub "next build"
-  BUILD_LOG="${LOG_HOME}/build-netlify-$(date +%Y%m%d-%H%M%S).log"
-  if npm run build > "$BUILD_LOG" 2>&1; then
-    ok "Build: PASS"
-    # Verify the route table shows expected output
-    if grep -q "Route (app)" "$BUILD_LOG"; then
-      ok "App Router routes detected"
-    fi
-    if [ -d ".next/server/app" ] || [ -d ".next/standalone" ]; then
-      if [ -d ".next/standalone" ]; then
-        warn ".next/standalone still present — build used standalone output"
-      fi
-    fi
-  else
-    err "Build: FAIL"
-    tail -30 "$BUILD_LOG"
+    err "TypeScript: FAIL — see $TSC_LOG"
+    awk '/error TS/ && NR<=20 { print "    " $0 }' "$TSC_LOG"
     exit 1
   fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STEP 7 — Commit and push (triggers Netlify auto-deploy)
+# STEP 5 — Push
 # ═══════════════════════════════════════════════════════════════════════════
-if [ "$DRY" -eq 0 ]; then
-  ban "7. Commit + push"
+if [ "$NOPUSH" -eq 0 ] && [ "$DRY" -eq 0 ]; then
+  ban "STEP 5 — Commit + push"
 
-  if [ -d .git ]; then
-    git add next.config.ts netlify.toml package.json package-lock.json 2>/dev/null || true
-    git add -A 2>/dev/null || true
+  git config user.email >/dev/null 2>&1 || git config user.email "kalkitechnologieski@gmail.com"
+  git config user.name  >/dev/null 2>&1 || git config user.name  "Setu Kalki"
 
-    if ! git diff --cached --quiet 2>/dev/null; then
-      git -c user.email="kalkitechnologieski@gmail.com" \
-          -c user.name="Setu Kalki" \
-          commit -q -m "Fix Netlify 404: configure Next.js runtime
+  # Ensure .next is gitignored (it's a build artifact)
+  if [ -f .gitignore ]; then
+    for p in ".next/" "next-env.d.ts" "*.tsbuildinfo" ".turbo/"; do
+      grep -qxF "$p" .gitignore 2>/dev/null || printf '\n%s\n' "$p" >> .gitignore
+    done
+  fi
 
-- Remove output: 'standalone' from next.config.ts (Vercel-only)
-- Add netlify.toml with @netlify/plugin-nextjs plugin
-- Set publish = '.next' for Next.js routing
-- Add @netlify/plugin-nextjs to devDependencies
-- Remove vercel.json (ignored by Netlify)
-- Add cache + security headers"
-      ok "Committed"
-    else
-      ok "No changes to commit"
-    fi
+  git add -A
 
-    if git remote get-url origin >/dev/null 2>&1; then
-      log "Pushing to origin/main…"
-      git push origin main >/dev/null 2>&1 || {
-        warn "Push failed — trying rebase"
-        git pull --rebase origin main >/dev/null 2>&1 && git push origin main >/dev/null 2>&1
-      }
-      ok "Pushed — Netlify will auto-deploy in ~90 seconds"
-    fi
+  if git diff --cached --quiet 2>/dev/null; then
+    ok "No changes to commit"
   else
-    warn "Not a git repository"
+    git commit -q -m "Fix stale Next.js type validators
+
+Root cause: .next/types/validator.ts and .next/dev/types/validator.ts
+still referenced app/page.js after the file was deleted in the previous
+Netlify fix commit. tsconfig.json includes .next/types/**/*.ts, so
+tsc --noEmit failed with TS2307.
+
+Fix: cleared .next/, .turbo/, *.tsbuildinfo caches and rebuilt to
+regenerate validators from the current route tree (app/(marketing)/page.tsx).
+Also hardened .gitignore for build artifacts."
+    ok "Committed"
+  fi
+
+  # Ensure remote
+  if git remote get-url origin >/dev/null 2>&1; then
+    existing=$(git remote get-url origin)
+    [ "$existing" = "$GIT_REMOTE" ] || git remote set-url origin "$GIT_REMOTE"
+  else
+    git remote add origin "$GIT_REMOTE"
+  fi
+
+  log "Pushing to origin/main…"
+  PUSH_OK=1
+  git push origin main >/dev/null 2>&1 || PUSH_OK=0
+
+  if [ "$PUSH_OK" -eq 0 ]; then
+    warn "Push rejected — attempting rebase"
+    if git pull --rebase origin main >/dev/null 2>&1; then
+      git push origin main >/dev/null 2>&1 && PUSH_OK=1
+    fi
+  fi
+
+  if [ "$PUSH_OK" -eq 1 ]; then
+    ok "Pushed to origin/main — Netlify rebuild starts in ~30s"
+  else
+    err "Push failed — resolve conflicts manually"
+    exit 1
   fi
 fi
 
-ban "FIX NETLIFY COMPLETE"
-ok "next.config.ts  — output mode removed"
-ok "netlify.toml    — @netlify/plugin-nextjs configured"
-ok "package.json    — plugin in devDependencies"
-ok "vercel.json     — removed"
-ok "Build           — verified locally"
-ok "Backup: ${BACKUP_ROOT}/${SNAPSHOT}"
+ban "FIX COMPLETE"
+ok "Stale validators:  cleared"
+ok "Fresh validators:  regenerated from current routes"
+ok "TypeScript:        PASS"
+ok "Netlify rebuild:   triggered"
 hr

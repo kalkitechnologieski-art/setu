@@ -1,10 +1,9 @@
-# netlify.toml — Setu Kalki Intelligence
-# Netlify deployment configuration for Next.js 15 App Router.
-#
-# Next.js 15 App Router is fully supported on Netlify with zero configuration
-# via the @netlify/plugin-nextjs runtime (v5+). Every feature is available:
-#   Server Components · Server Actions · Middleware · Route Handlers
-#   Streaming · ISR · Image Optimization · Redirects · Revalidation
+# ═══════════════════════════════════════════════════════════════════════════
+# Setu Kalki Intelligence — Netlify configuration
+# ═══════════════════════════════════════════════════════════════════════════
+# Next.js 15 App Router is fully supported on Netlify via the OpenNext
+# adapter (@netlify/plugin-nextjs v5+). No manual build wrapping required.
+# ═══════════════════════════════════════════════════════════════════════════
 
 [build]
   command = "npm run build"
@@ -12,28 +11,65 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  NEXT_TELEMETRY_DISABLED = "1"
   NPM_FLAGS = "--legacy-peer-deps"
 
-# The Next.js runtime — required. Without this, Netlify returns 404 for
-# every route because it doesn't know how to route requests to Next.js.
+# ─── Next.js runtime ─────────────────────────────────────────────────────
+# The plugin is mandatory. Without it, Netlify treats this as a static
+# site, ignores .next/server/*, and returns 404 for every route.
+#
+# Netlify also auto-detects this plugin when Next.js is present, but
+# declaring it explicitly guarantees the runtime is applied even if
+# auto-detection changes.
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# ─── Optional: preserve Next.js static assets on the CDN ─────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# HEADERS
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Immutable Next.js build assets — safe to cache for a year.
 [[headers]]
   for = "/_next/static/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+# Favicon — moderate cache.
 [[headers]]
   for = "/favicon.ico"
   [headers.values]
     Cache-Control = "public, max-age=86400"
 
-# ─── Security headers ────────────────────────────────────────────────────
+# Next.js image optimizer output.
+[[headers]]
+  for = "/_next/image*"
+  [headers.values]
+    Cache-Control = "public, max-age=60, stale-while-revalidate=86400"
+
+# API routes — never cached.
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Cache-Control = "no-store, max-age=0"
+
+# Global security headers.
 [[headers]]
   for = "/*"
   [headers.values]
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "SAMEORIGIN"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DEPLOY CONTEXTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+[context.production]
+  command = "npm run build"
+
+[context.deploy-preview]
+  command = "npm run build"
+
+[context.branch-deploy]
+  command = "npm run build"

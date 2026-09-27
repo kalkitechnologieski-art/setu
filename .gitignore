@@ -57,3 +57,7 @@ phase2.env.local
 
 # Phase II — never commit secrets
 *.local
+
+.next/
+
+.turbo/
