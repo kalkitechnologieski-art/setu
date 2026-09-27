@@ -2,52 +2,114 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Shared type surface for the entire lib/ layer.
 // ═══════════════════════════════════════════════════════════════════════════
-//
-// NOTE: `Json` is imported at file scope (not just re-exported) so that the
-// local toJson() and Jsonify<T> helpers below can reference it. A bare
-// `export type { Json } from "..."` re-exports without populating the
-// module's local namespace, which would make `Json` unresolvable here.
-//
-// IMPORTANT: only re-export names that actually exist in
-// lib/supabase/types.ts — otherwise TS2305 fires at the re-export site.
-
 import type { Json } from "@/lib/supabase/types";
 
-// ─── Supabase — re-exports (must match lib/supabase/types.ts exactly) ─────
+// ─── Supabase re-exports (must match lib/supabase/types.ts exactly) ──────
 export type {
   Database,
   Json,
-  Profile,  Lead,  Campaign,  Email,  Call,
-  AdPerformance,  AgentRun,  Job,  RateLimit,
-  Approval,  Signal,  AgentCost,
 
-  ProfileInsert,  ProfileUpdate,
-  LeadInsert,     LeadUpdate,
-  CampaignInsert, CampaignUpdate,
-  EmailInsert,    CallInsert,
-  AgentRunInsert, JobInsert,
-  ApprovalInsert, ApprovalUpdate,
-  SignalInsert,   SignalUpdate,
+  Profile,
+  Lead,
+  Campaign,
+  Email,
+  Call,
+  AdPerformance,
+  AgentRun,
+  Job,
+  RateLimit,
+  Approval,
+  Signal,
+  AgentCost,
+  PlatformConnection,
+  AuthEvent,
+  AgentRegistry,
+  ApprovalChain,
+  AgentMetric,
+  GovernanceEvent,
+  ContentPost,
+  KnowledgeBase,
+  DocumentRow,
+  DocumentSection,
+
+  ProfileInsert,
+  LeadInsert,
+  CampaignInsert,
+  EmailInsert,
+  CallInsert,
+  AdPerformanceInsert,
+  AgentRunInsert,
+  JobInsert,
+  RateLimitInsert,
+  ApprovalInsert,
+  SignalInsert,
   AgentCostInsert,
+  PlatformConnectionInsert,
+  AuthEventInsert,
+  AgentRegistryInsert,
+  ApprovalChainInsert,
+  AgentMetricInsert,
+  GovernanceEventInsert,
+  ContentPostInsert,
+  KnowledgeBaseInsert,
+  DocumentInsert,
+  DocumentSectionInsert,
 
-  LeadStatus, CampaignStatus, CampaignType, EmailStatus,
-  CallDirection, CallSentiment, AgentRunStatus, JobStatus,
-  Plan, ApprovalStatus, SignalUrgency,
+  ProfileUpdate,
+  LeadUpdate,
+  CampaignUpdate,
+  EmailUpdate,
+  CallUpdate,
+  AgentRunUpdate,
+  JobUpdate,
+  ApprovalUpdate,
+  SignalUpdate,
+  ContentPostUpdate,
+  KnowledgeBaseUpdate,
+  DocumentUpdate,
 
-  ClaimJobArgs, ClaimJobReturn,
-  CheckRateLimitArgs, CheckRateLimitReturn,
+  LeadStatus,
+  CampaignStatus,
+  CampaignType,
+  ContentStatus,
+  DocumentStatus,
+  KnowledgeScope,
+  PlatformSlug,
+  EmailStatus,
+  CallDirection,
+  CallSentiment,
+  AgentRunStatus,
+  JobStatus,
+  Plan,
+  ApprovalStatus,
+  SignalUrgency,
+
+  ClaimJobArgs,
+  ClaimJobReturn,
+  CheckRateLimitArgs,
+  CheckRateLimitReturn,
+  StorePlatformSecretArgs,
+  StorePlatformSecretReturn,
+  ReadPlatformSecretArgs,
+  ReadPlatformSecretReturn,
+  SeedDefaultAgentsArgs,
+  MatchDocumentSectionsArgs,
+  MatchDocumentSectionsReturn,
 } from "@/lib/supabase/types";
 
-// ─── LLM ───────────────────────────────────────────────────────────────────
+// ─── LLM ─────────────────────────────────────────────────────────────────
 export type { LLMMessage, LLMResult, RouterOptions } from "@/lib/llm/router";
 export type { ProviderName } from "@/lib/llm/providers";
 
-// ─── MCP ───────────────────────────────────────────────────────────────────
+// ─── MCP ─────────────────────────────────────────────────────────────────
 export type {
-  MCPToolDefinition, MCPService, MCPCallResult, MCPToolKind,
+  MCPToolDefinition,
+  MCPService,
+  MCPCallResult,
+  MCPToolKind,
 } from "@/lib/mcp/types";
 
-// ─── Marketing domain ─────────────────────────────────────────────────────
+// ─── Marketing domain ────────────────────────────────────────────────────
 
 export interface BudgetRecommendation {
   campaign_id: string;
@@ -79,14 +141,19 @@ export interface PerformanceAudit {
   avg_roas: number;
 }
 
-// ─── Worker contract (discriminated union) ────────────────────────────────
+// ─── Worker contract ─────────────────────────────────────────────────────
 
 export type WorkerStatus = "ok" | "pending_approval" | "failed";
 
 export type WorkerErrorCode =
-  | "CONFIG_MISSING" | "PROVIDER_UNAVAILABLE" | "PROVIDER_RATE_LIMITED"
-  | "MCP_CALL_FAILED" | "VALIDATION_FAILED" | "TIMEOUT"
-  | "APPROVAL_REJECTED" | "UNKNOWN";
+  | "CONFIG_MISSING"
+  | "PROVIDER_UNAVAILABLE"
+  | "PROVIDER_RATE_LIMITED"
+  | "MCP_CALL_FAILED"
+  | "VALIDATION_FAILED"
+  | "TIMEOUT"
+  | "APPROVAL_REJECTED"
+  | "UNKNOWN";
 
 export interface WorkerError {
   code: WorkerErrorCode;
@@ -167,9 +234,7 @@ export const DEFAULT_WORKER_OPTIONS: WorkerRuntimeOptions = {
   logToDatabase: true,
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-// JSON serialization helpers
-// ═══════════════════════════════════════════════════════════════════════════
+// ─── JSON serialization helpers ──────────────────────────────────────────
 
 export type Jsonify<T> = T extends string | number | boolean | null
   ? T
@@ -183,9 +248,16 @@ export type Jsonify<T> = T extends string | number | boolean | null
 
 export function toJson<T>(value: T): Json {
   if (value === null || value === undefined) return null;
+
   const t = typeof value;
-  if (t === "string" || t === "number" || t === "boolean") return value as Json;
-  if (Array.isArray(value)) return value.map((v) => toJson(v));
+  if (t === "string" || t === "number" || t === "boolean") {
+    return value as Json;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((v) => toJson(v));
+  }
+
   if (t === "object") {
     const out: { [k: string]: Json } = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
@@ -193,5 +265,6 @@ export function toJson<T>(value: T): Json {
     }
     return out;
   }
+
   return null;
 }

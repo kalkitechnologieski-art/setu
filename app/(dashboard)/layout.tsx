@@ -5,6 +5,7 @@ import { CommandPalette } from "@/components/app/command-palette";
 import { SiddhiPanel } from "@/components/siddhi/siddhi-panel";
 import { SiddhiLauncher } from "@/components/siddhi/siddhi-launcher";
 import { OnboardingTour } from "@/components/guided/onboarding-tour";
+import { ShortcutsOverlay } from "@/components/keyboard/shortcuts-overlay";
 
 export default function DashboardLayout({
   children,
@@ -25,6 +26,7 @@ export default function DashboardLayout({
       <SiddhiPanel />
       <SiddhiLauncher />
       <OnboardingTour />
+      <ShortcutsOverlay />
     </div>
   );
 }

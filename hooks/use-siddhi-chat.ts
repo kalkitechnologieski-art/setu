@@ -3,15 +3,29 @@
 
 import { useCallback, useState } from "react";
 
+export interface ChatApproval {
+  id: string;
+  action: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   provider?: string;
   createdAt: number;
+  approval?: ChatApproval | null;
 }
 
-export function useSiddhiChat() {
+export interface UseSiddhiChatResult {
+  messages: ChatMessage[];
+  sending: boolean;
+  error: string | null;
+  send: (content: string) => Promise<void>;
+  reset: () => void;
+}
+
+export function useSiddhiChat(): UseSiddhiChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,25 +58,27 @@ export function useSiddhiChat() {
         });
 
         if (!res.ok) {
-          const errBody = (await res.json().catch(() => ({}))) as {
-            message?: string;
-          };
-          throw new Error(errBody.message ?? `HTTP ${res.status}`);
+          const body = (await res.json().catch(() => ({}))) as { message?: string };
+          throw new Error(body.message ?? `HTTP ${res.status}`);
         }
 
         const data = (await res.json()) as {
           text: string;
           provider?: string;
+          approval?: ChatApproval | null;
         };
 
-        const assistantMsg: ChatMessage = {
-          id: `a-${Date.now()}`,
-          role: "assistant",
-          content: data.text,
-          provider: data.provider,
-          createdAt: Date.now(),
-        };
-        setMessages((prev) => [...prev, assistantMsg]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content: data.text,
+            provider: data.provider,
+            createdAt: Date.now(),
+            approval: data.approval ?? null,
+          },
+        ]);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Something went wrong";
         setError(msg);
