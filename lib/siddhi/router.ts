@@ -1,0 +1,129 @@
+// lib/siddhi/router.ts
+// LLM router with tool-calling: Groq → Agnes → OpenRouter.
+import type {
+  SiddhiMessage,
+  SiddhiProviderResult,
+  SiddhiToolCall,
+} from "./types";
+import { toolsForLLM } from "./tools";
+
+interface OpenAIChatResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+      tool_calls?: SiddhiToolCall[];
+    };
+  }>;
+}
+
+interface ProviderConfig {
+  name: "groq" | "agnes" | "openrouter";
+  url: string;
+  model: string;
+  keyEnv: string;
+  supportsTools: boolean;
+}
+
+const PROVIDERS: ProviderConfig[] = [
+  {
+    name: "groq",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    model: "llama-3.3-70b-versatile",
+    keyEnv: "GROQ_API_KEY",
+    supportsTools: true,
+  },
+  {
+    name: "agnes",
+    url: process.env.AGNES_API_URL ?? "https://api.agnesai.com/v1/chat/completions",
+    model: process.env.AGNES_MODEL ?? "agnes-2.0-flash",
+    keyEnv: "AGNES_API_KEY",
+    supportsTools: true,
+  },
+  {
+    name: "openrouter",
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    model: "meta-llama/llama-3.1-8b-instruct:free",
+    keyEnv: "OPENROUTER_API_KEY",
+    supportsTools: false,
+  },
+];
+
+async function callProvider(
+  provider: ProviderConfig,
+  messages: SiddhiMessage[],
+  withTools: boolean
+): Promise<SiddhiProviderResult> {
+  const key = process.env[provider.keyEnv];
+  if (!key || key === "__SET_ME__") {
+    throw new Error(`missing key ${provider.keyEnv}`);
+  }
+
+  const body: Record<string, unknown> = {
+    model: provider.model,
+    messages: messages.map((m) => {
+      const out: Record<string, unknown> = {
+        role: m.role,
+        content: m.content || null,
+      };
+      if (m.tool_calls) out.tool_calls = m.tool_calls;
+      if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
+      if (m.name) out.name = m.name;
+      return out;
+    }),
+    temperature: 0.4,
+    max_tokens: 1024,
+  };
+
+  if (withTools && provider.supportsTools) {
+    body.tools = toolsForLLM();
+    body.tool_choice = "auto";
+  }
+
+  const res = await fetch(provider.url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${provider.name} ${res.status}: ${text.slice(0, 200)}`);
+  }
+
+  const json = (await res.json()) as OpenAIChatResponse;
+  const choice = json.choices?.[0]?.message;
+  const text = choice?.content ?? "";
+  const toolCalls = choice?.tool_calls;
+
+  return {
+    text,
+    provider: provider.name,
+    model: provider.model,
+    toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
+  };
+}
+
+export async function callSiddhiLLM(
+  messages: SiddhiMessage[],
+  withTools = true
+): Promise<SiddhiProviderResult> {
+  let lastError: unknown = null;
+
+  for (const provider of PROVIDERS) {
+    try {
+      return await callProvider(provider, messages, withTools);
+    } catch (e) {
+      lastError = e;
+      console.warn(`[siddhi] ${provider.name} failed:`, e);
+    }
+  }
+
+  throw new Error(
+    `All LLM providers failed. Last error: ${
+      lastError instanceof Error ? lastError.message : String(lastError)
+    }`
+  );
+}

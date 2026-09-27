@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   ArrowDownRight,
   ArrowUpRight,
@@ -12,6 +13,7 @@ interface StatCardProps {
   icon: LucideIcon;
   accent?: "violet" | "blue" | "emerald" | "amber";
   hint?: string;
+  href?: string;
 }
 
 const ACCENTS = {
@@ -44,20 +46,20 @@ export function StatCard({
   icon: Icon,
   accent = "violet",
   hint,
+  href,
 }: StatCardProps) {
   const positive = (delta ?? 0) >= 0;
   const a = ACCENTS[accent];
 
-  return (
+  const inner = (
     <div
       className={cn(
-        "group relative overflow-hidden rounded-2xl border bg-card",
-        "p-5 shadow-sm transition-all",
+        "group relative overflow-hidden rounded-2xl border bg-card p-5",
+        "shadow-sm transition-all",
         "hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary/5",
-        "active:scale-[0.98]"
+        href ? "active:scale-[0.98]" : ""
       )}
     >
-      {/* Radial glow */}
       <div
         className={cn(
           "pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full bg-gradient-to-br blur-2xl",
@@ -65,7 +67,6 @@ export function StatCard({
           a.glow
         )}
       />
-
       <div className="relative flex items-start justify-between">
         <div
           className={cn(
@@ -77,7 +78,6 @@ export function StatCard({
         >
           <Icon className="size-5" />
         </div>
-
         {typeof delta === "number" && (
           <span
             className={cn(
@@ -96,7 +96,6 @@ export function StatCard({
           </span>
         )}
       </div>
-
       <div className="relative mt-5 space-y-1">
         <div className="text-3xl font-semibold tracking-tight tabular-nums">
           {value}
@@ -112,5 +111,13 @@ export function StatCard({
       </div>
     </div>
   );
-}
 
+  if (href) {
+    return (
+      <Link href={href} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-2xl">
+        {inner}
+      </Link>
+    );
+  }
+  return inner;
+}

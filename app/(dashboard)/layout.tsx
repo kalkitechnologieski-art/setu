@@ -2,8 +2,15 @@ import { AppSidebar } from "@/components/app/sidebar";
 import { AppTopbar } from "@/components/app/topbar";
 import { BottomNav } from "@/components/app/bottom-nav";
 import { CommandPalette } from "@/components/app/command-palette";
+import { SiddhiPanel } from "@/components/siddhi/siddhi-panel";
+import { SiddhiLauncher } from "@/components/siddhi/siddhi-launcher";
+import { OnboardingTour } from "@/components/guided/onboarding-tour";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar />
@@ -15,7 +22,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </div>
       <BottomNav />
       <CommandPalette />
+      <SiddhiPanel />
+      <SiddhiLauncher />
+      <OnboardingTour />
     </div>
   );
 }
-

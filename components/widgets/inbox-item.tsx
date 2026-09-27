@@ -1,3 +1,5 @@
+"use client";
+
 import { Mail, MessageSquare, Phone, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -11,6 +13,7 @@ interface InboxItemProps {
   timestamp: string;
   confidence?: number;
   active?: boolean;
+  onSelect?: () => void;
 }
 
 const CHANNEL_ICON: Record<InboxChannel, typeof Mail> = {
@@ -34,11 +37,13 @@ export function InboxItem({
   timestamp,
   confidence,
   active,
+  onSelect,
 }: InboxItemProps) {
   const Icon = CHANNEL_ICON[channel];
   return (
     <button
       type="button"
+      onClick={onSelect}
       className={cn(
         "w-full rounded-xl border p-3 text-left transition-all",
         active
@@ -57,7 +62,9 @@ export function InboxItem({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <span className="truncate text-sm font-semibold">{sender}</span>
+            <span className="truncate text-sm font-semibold capitalize">
+              {sender}
+            </span>
             <span className="shrink-0 text-[10px] text-muted-foreground">
               {timestamp}
             </span>
@@ -66,7 +73,10 @@ export function InboxItem({
             {summary}
           </p>
           {typeof confidence === "number" && (
-            <Badge variant="outline" className="mt-1.5 h-5 text-[10px] tabular-nums">
+            <Badge
+              variant="outline"
+              className="mt-1.5 h-5 text-[10px] tabular-nums"
+            >
               {Math.round(confidence * 100)}% confident
             </Badge>
           )}

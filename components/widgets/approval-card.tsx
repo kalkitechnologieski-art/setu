@@ -1,27 +1,85 @@
-import { Check, X, Sparkles } from "lucide-react";
+"use client";
+
+import { useState, useTransition } from "react";
+import { Check, Loader2, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface ApprovalCardProps {
+  approvalId?: string;
   agentName: string;
   action: string;
   summary: string;
   reasoning?: string;
   confidence?: number;
   accent?: string;
+  onApprove?: (id: string) => Promise<void> | void;
+  onReject?: (id: string) => Promise<void> | void;
 }
 
 export function ApprovalCard({
-  agentName, action, summary, reasoning, confidence, accent = "from-violet-500 to-indigo-500",
+  approvalId,
+  agentName,
+  action,
+  summary,
+  reasoning,
+  confidence,
+  accent = "from-violet-500 to-indigo-500",
+  onApprove,
+  onReject,
 }: ApprovalCardProps) {
+  const [isPending, startTransition] = useTransition();
+  const [localState, setLocalState] = useState<
+    "idle" | "approved" | "rejected"
+  >("idle");
+
+  function handleApprove() {
+    if (!approvalId || !onApprove) {
+      setLocalState("approved");
+      return;
+    }
+    startTransition(async () => {
+      try {
+        await onApprove(approvalId);
+        setLocalState("approved");
+      } catch {
+        setLocalState("idle");
+      }
+    });
+  }
+
+  function handleReject() {
+    if (!approvalId || !onReject) {
+      setLocalState("rejected");
+      return;
+    }
+    startTransition(async () => {
+      try {
+        await onReject(approvalId);
+        setLocalState("rejected");
+      } catch {
+        setLocalState("idle");
+      }
+    });
+  }
+
+  const resolved = localState !== "idle";
+
   return (
-    <article className="group relative overflow-hidden rounded-2xl border bg-card p-4 transition-all hover:shadow-md">
+    <article
+      className={cn(
+        "group relative overflow-hidden rounded-2xl border bg-card p-4 transition-all hover:shadow-md",
+        resolved && "opacity-60"
+      )}
+    >
       <header className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <div className={cn(
-            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-white text-xs font-semibold",
-            accent
-          )}>
+          <div
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-semibold text-white",
+              accent
+            )}
+          >
             {agentName.slice(0, 2).toUpperCase()}
           </div>
           <div className="min-w-0">
@@ -43,7 +101,7 @@ export function ApprovalCard({
       </p>
 
       {reasoning && (
-        <details className="mt-2 group/reason">
+        <details className="mt-2">
           <summary className="flex cursor-pointer items-center gap-1 text-xs font-medium text-primary hover:underline">
             <Sparkles className="size-3" />
             Show reasoning
@@ -55,14 +113,31 @@ export function ApprovalCard({
       )}
 
       <div className="mt-4 flex items-center gap-2">
-        <Button size="sm" variant="gradient" className="flex-1">
-          <Check className="size-4" /> Approve
+        <Button
+          size="sm"
+          variant="gradient"
+          className="flex-1"
+          disabled={isPending || resolved}
+          onClick={handleApprove}
+        >
+          {isPending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <Check className="size-4" />
+          )}
+          {localState === "approved" ? "Approved" : "Approve"}
         </Button>
-        <Button size="sm" variant="outline" className="flex-1">
-          <X className="size-4" /> Reject
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1"
+          disabled={isPending || resolved}
+          onClick={handleReject}
+        >
+          <X className="size-4" />
+          {localState === "rejected" ? "Rejected" : "Reject"}
         </Button>
       </div>
     </article>
   );
 }
-
