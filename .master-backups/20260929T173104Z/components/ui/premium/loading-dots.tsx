@@ -6,9 +6,9 @@ export function LoadingDots({ className }: { className?: string }) {
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="h-1.5 w-1.5 rounded-full bg-[var(--hacker-green)] shadow-[0_0_6px_var(--hacker-green)]"
+          className="h-1.5 w-1.5 rounded-full bg-current"
           style={{
-            animation: `dot-pulse 1.4s ${i * 0.2}s infinite ease-in-out both`,
+            animation: `setu-dot 1.2s ${i * 0.15}s infinite ease-in-out both`,
           }}
         />
       ))}

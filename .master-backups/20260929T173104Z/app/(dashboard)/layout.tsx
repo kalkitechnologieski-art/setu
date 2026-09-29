@@ -27,11 +27,6 @@ export default function DashboardLayout({
       <SiddhiLauncher />
       <OnboardingTour />
       <ShortcutsOverlay />
-      {/* CRT scanline overlay — decorative */}
-      <div
-        aria-hidden
-        className="crt-overlay pointer-events-none fixed inset-0 z-[100] scanlines opacity-30"
-      />
     </div>
   );
 }
