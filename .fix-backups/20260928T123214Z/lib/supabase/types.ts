@@ -144,12 +144,6 @@ export type Database = {
         Update: { id?: string; user_id?: string; name?: string; description?: string | null; scope?: string; created_at?: string; updated_at?: string };
         Relationships: [];
       };
-      notifications: {
-        Row: { id: string; user_id: string; title: string; body: string | null; kind: string; link: string | null; read_at: string | null; created_at: string };
-        Insert: { id?: string; user_id: string; title: string; body?: string | null; kind?: string; link?: string | null; read_at?: string | null; created_at?: string };
-        Update: { id?: string; user_id?: string; title?: string; body?: string | null; kind?: string; link?: string | null; read_at?: string | null; created_at?: string };
-        Relationships: [];
-      };
       documents: {
         Row: { id: string; knowledge_base_id: string; user_id: string; name: string; mime_type: string | null; size_bytes: number; source_url: string | null; status: string; error_message: string | null; metadata: Json; created_at: string; updated_at: string };
         Insert: { id?: string; knowledge_base_id: string; user_id: string; name: string; mime_type?: string | null; size_bytes?: number; source_url?: string | null; status?: string; error_message?: string | null; metadata?: Json; created_at?: string; updated_at?: string };
@@ -206,7 +200,6 @@ export type ContentPost        = Database["public"]["Tables"]["content_posts"]["
 export type KnowledgeBase      = Database["public"]["Tables"]["knowledge_bases"]["Row"];
 export type DocumentRow        = Database["public"]["Tables"]["documents"]["Row"];
 export type DocumentSection    = Database["public"]["Tables"]["document_sections"]["Row"];
-export type NotificationRow    = Database["public"]["Tables"]["notifications"]["Row"];
 
 // ─── Insert aliases ───────────────────────────────────────────────────────
 export type ProfileInsert            = Database["public"]["Tables"]["profiles"]["Insert"];
@@ -231,7 +224,6 @@ export type ContentPostInsert        = Database["public"]["Tables"]["content_pos
 export type KnowledgeBaseInsert      = Database["public"]["Tables"]["knowledge_bases"]["Insert"];
 export type DocumentInsert           = Database["public"]["Tables"]["documents"]["Insert"];
 export type DocumentSectionInsert    = Database["public"]["Tables"]["document_sections"]["Insert"];
-export type NotificationInsert = Database["public"]["Tables"]["notifications"]["Insert"];
 
 // ─── Update aliases ───────────────────────────────────────────────────────
 export type ProfileUpdate            = Database["public"]["Tables"]["profiles"]["Update"];
@@ -246,7 +238,6 @@ export type SignalUpdate             = Database["public"]["Tables"]["signals"]["
 export type ContentPostUpdate        = Database["public"]["Tables"]["content_posts"]["Update"];
 export type KnowledgeBaseUpdate      = Database["public"]["Tables"]["knowledge_bases"]["Update"];
 export type DocumentUpdate           = Database["public"]["Tables"]["documents"]["Update"];
-export type NotificationUpdate = Database["public"]["Tables"]["notifications"]["Update"];
 
 // ─── Literal unions ───────────────────────────────────────────────────────
 export type LeadStatus        = "new" | "contacted" | "qualified" | "converted" | "lost";
@@ -256,16 +247,6 @@ export type ContentStatus     = "draft" | "pending_approval" | "scheduled" | "pu
 export type DocumentStatus    = "pending" | "processing" | "ready" | "failed";
 export type KnowledgeScope    = "private" | "shared_with_agents" | "shared_with_team";
 export type PlatformSlug      = "instagram" | "facebook" | "youtube" | "linkedin" | "tiktok";
-
-export type NotificationKind =
-  | "info"
-  | "success"
-  | "warning"
-  | "error"
-  | "approval"
-  | "signal"
-  | "call"
-  | "content";
 
 // ─── RPC helpers ──────────────────────────────────────────────────────────
 export type ClaimJobArgs   = Database["public"]["Functions"]["claim_job"]["Args"];

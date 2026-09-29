@@ -12,8 +12,8 @@ create table if not exists public.approvals (
   payload jsonb not null default {}::jsonb,
   reasoning text,
   confidence numeric(4,3) check (confidence is null or (confidence >= 0 and confidence <= 1)),
-  status text not null default 'pending'
-    check (status in ('pending','approved','rejected','expired')),
+  status text not null default pending
+    check (status in (pending,approved,rejected,expired)),
   decided_at timestamptz,
   decided_by uuid references public.profiles(id) on delete set null,
   decision_reason text,
@@ -39,7 +39,7 @@ create table if not exists public.signals (
   title text not null,
   description text,
   icp_score int check (icp_score is null or (icp_score between 0 and 100)),
-  urgency text check (urgency in ('low','medium','high','critical')),
+  urgency text check (urgency in (low,medium,high,critical)),
   raw_data jsonb not null default {}::jsonb,
   created_at timestamptz not null default now()
 );

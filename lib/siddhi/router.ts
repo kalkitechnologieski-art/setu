@@ -1,11 +1,6 @@
 // lib/siddhi/router.ts
-// Tool-calling LLM router. Same fail-fast, key-presence-aware semantics as
-// lib/llm/router.ts. Only providers with keys set are tried.
-import type {
-  SiddhiMessage,
-  SiddhiProviderResult,
-  SiddhiToolCall,
-} from "./types";
+// Tool-calling router with fail-fast, key-validity-aware semantics.
+import type { SiddhiMessage, SiddhiProviderResult, SiddhiToolCall } from "./types";
 import { toolsForLLM } from "./tools";
 
 interface OpenAIChatResponse {
@@ -46,9 +41,12 @@ const PROVIDERS: ProviderConfig[] = [
   },
 ];
 
-function hasKey(name: string): boolean {
+function getKey(name: string): string | null {
   const v = process.env[name];
-  return Boolean(v && v !== "__SET_ME__" && v.trim() !== "");
+  if (!v) return null;
+  const t = v.trim();
+  if (t === "" || t === "__SET_ME__" || t.length < 8) return null;
+  return t;
 }
 
 function origin(): string {
@@ -62,16 +60,13 @@ async function callProvider(
   messages: SiddhiMessage[],
   withTools: boolean
 ): Promise<SiddhiProviderResult> {
-  const key = process.env[provider.keyEnv];
-  if (!key || key === "__SET_ME__") throw new Error(`missing_${provider.keyEnv}`);
+  const key = getKey(provider.keyEnv);
+  if (!key) throw new Error(`missing_${provider.keyEnv}`);
 
   const body: Record<string, unknown> = {
     model: provider.model,
     messages: messages.map((m) => {
-      const out: Record<string, unknown> = {
-        role: m.role,
-        content: m.content || null,
-      };
+      const out: Record<string, unknown> = { role: m.role, content: m.content || null };
       if (m.tool_calls) out.tool_calls = m.tool_calls;
       if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
       if (m.name) out.name = m.name;
@@ -91,10 +86,9 @@ async function callProvider(
     "Content-Type": "application/json",
   };
 
-  // OpenRouter requires these for browser-origin requests
   if (provider.name === "openrouter") {
     headers["HTTP-Referer"] = origin();
-    headers["X-Title"] = "Setu Kalki";
+    headers["X-OpenRouter-Title"] = "Setu Kalki";
   }
 
   const res = await fetch(provider.url, {
@@ -125,11 +119,11 @@ export async function callSiddhiLLM(
   messages: SiddhiMessage[],
   withTools = true
 ): Promise<SiddhiProviderResult> {
-  const available = PROVIDERS.filter((p) => hasKey(p.keyEnv));
+  const available = PROVIDERS.filter((p) => getKey(p.keyEnv) !== null);
 
   if (available.length === 0) {
     throw new Error(
-      "No LLM provider configured. Add GROQ_API_KEY, AGNES_API_KEY, or OPENROUTER_API_KEY to Netlify environment variables."
+      "No LLM provider configured. Add GROQ_API_KEY (recommended) to Netlify environment variables."
     );
   }
 

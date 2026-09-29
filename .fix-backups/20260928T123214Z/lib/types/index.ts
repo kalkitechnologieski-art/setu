@@ -31,7 +31,6 @@ export type {
   KnowledgeBase,
   DocumentRow,
   DocumentSection,
-  NotificationRow,
 
   ProfileInsert,
   LeadInsert,
@@ -55,7 +54,6 @@ export type {
   KnowledgeBaseInsert,
   DocumentInsert,
   DocumentSectionInsert,
-  NotificationInsert,
 
   ProfileUpdate,
   LeadUpdate,
@@ -69,7 +67,6 @@ export type {
   ContentPostUpdate,
   KnowledgeBaseUpdate,
   DocumentUpdate,
-  NotificationUpdate,
 
   LeadStatus,
   CampaignStatus,
@@ -78,7 +75,6 @@ export type {
   DocumentStatus,
   KnowledgeScope,
   PlatformSlug,
-  NotificationKind,
   EmailStatus,
   CallDirection,
   CallSentiment,

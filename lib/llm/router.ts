@@ -2,11 +2,12 @@
 // ─────────────────────────────────────────────────────────────────────────
 // Multi-provider LLM router with fail-fast semantics.
 //
-// Providers are only tried if their API key is actually set. This prevents
-// the "All providers failed" error when one key is missing.
+// Providers are only tried when their API key is BOTH present AND valid
+// (not empty, not "__SET_ME__", not fewer than 8 chars).
 //
-// OpenRouter requires HTTP-Referer and X-Title headers for browser-origin
-// requests — otherwise it returns 401 "Missing Authentication header".
+// OpenRouter requires HTTP-Referer and X-OpenRouter-Title headers for
+// browser-origin requests — without them it returns 401 "Missing
+// Authentication header" even with a valid API key.
 // ─────────────────────────────────────────────────────────────────────────
 
 export interface LLMMessage {
@@ -28,17 +29,15 @@ export interface RouterOptions {
   preferredProvider?: "groq" | "gemini" | "openrouter";
 }
 
-// ─── Environment resolution (checked once at call time) ──────────────────
+// ─── Environment resolution ──────────────────────────────────────────────
 
 function getKey(name: string): string | null {
   const v = process.env[name];
-  if (!v || v === "__SET_ME__" || v.trim() === "") return null;
-  return v.trim();
+  if (!v) return null;
+  const t = v.trim();
+  if (t === "" || t === "__SET_ME__" || t.length < 8) return null;
+  return t;
 }
-
-const GROQ_KEY = () => getKey("GROQ_API_KEY");
-const GEMINI_KEY = () => getKey("GEMINI_API_KEY");
-const OPENROUTER_KEY = () => getKey("OPENROUTER_API_KEY");
 
 function origin(): string {
   const url = process.env.NEXT_PUBLIC_APP_URL;
@@ -53,16 +52,13 @@ async function callGroq(
   temperature: number,
   maxTokens: number
 ): Promise<{ text: string; model: string }> {
-  const key = GROQ_KEY();
+  const key = getKey("GROQ_API_KEY");
   if (!key) throw new Error("missing_groq_key");
 
   const model = "llama-3.1-8b-instant";
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
   });
 
@@ -82,7 +78,7 @@ async function callGemini(
   temperature: number,
   maxTokens: number
 ): Promise<{ text: string; model: string }> {
-  const key = GEMINI_KEY();
+  const key = getKey("GEMINI_API_KEY");
   if (!key) throw new Error("missing_gemini_key");
 
   const model = "gemini-2.5-flash-lite";
@@ -104,11 +100,7 @@ async function callGemini(
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
   );
 
   if (!res.ok) {
@@ -119,10 +111,7 @@ async function callGemini(
   const json = (await res.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
-  return {
-    text: json.candidates?.[0]?.content?.parts?.[0]?.text ?? "",
-    model,
-  };
+  return { text: json.candidates?.[0]?.content?.parts?.[0]?.text ?? "", model };
 }
 
 async function callOpenRouter(
@@ -130,7 +119,7 @@ async function callOpenRouter(
   temperature: number,
   maxTokens: number
 ): Promise<{ text: string; model: string }> {
-  const key = OPENROUTER_KEY();
+  const key = getKey("OPENROUTER_API_KEY");
   if (!key) throw new Error("missing_openrouter_key");
 
   const model = "meta-llama/llama-3.1-8b-instruct:free";
@@ -139,10 +128,9 @@ async function callOpenRouter(
     headers: {
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
-      // REQUIRED for browser-origin requests — OpenRouter returns
-      // 401 "Missing Authentication header" without these.
+      // REQUIRED — OpenRouter returns 401 without these
       "HTTP-Referer": origin(),
-      "X-Title": "Setu Kalki",
+      "X-OpenRouter-Title": "Setu Kalki",
     },
     body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
   });
@@ -164,19 +152,17 @@ export async function routeLLM(opts: RouterOptions): Promise<LLMResult> {
   const temperature = opts.temperature ?? 0.7;
   const maxTokens = opts.maxTokens ?? 2048;
 
-  // Build the chain from providers whose keys are actually set.
   const available: Array<"groq" | "gemini" | "openrouter"> = [];
-  if (GROQ_KEY()) available.push("groq");
-  if (GEMINI_KEY()) available.push("gemini");
-  if (OPENROUTER_KEY()) available.push("openrouter");
+  if (getKey("GROQ_API_KEY")) available.push("groq");
+  if (getKey("GEMINI_API_KEY")) available.push("gemini");
+  if (getKey("OPENROUTER_API_KEY")) available.push("openrouter");
 
   if (available.length === 0) {
     throw new Error(
-      "No LLM provider configured. Add GROQ_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY."
+      "No LLM provider configured. Add GROQ_API_KEY (recommended), GEMINI_API_KEY, or OPENROUTER_API_KEY."
     );
   }
 
-  // Prefer the requested provider if available, then the rest in order.
   const chain = opts.preferredProvider && available.includes(opts.preferredProvider)
     ? [opts.preferredProvider, ...available.filter((p) => p !== opts.preferredProvider)]
     : available;

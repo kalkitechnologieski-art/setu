@@ -1,0 +1,58 @@
+
+[1m[0;35m╔══════════════════════════════════════════════════════════════╗[0m
+
+[1m[0;35m║   SETU KALKI — NOTIFICATION TYPE FIX                         ║[0m
+
+[1m[0;35m║   Run:      20260928T123214Z                                   ║[0m
+
+[1m[0;35m║   Platform: windows                                        ║[0m
+
+[1m[0;35m╚══════════════════════════════════════════════════════════════╝[0m
+
+[1m[0;36m━━━ Step 1 — Target files ━━━[0m
+[0;32m[2026-09-28T12:32:16Z][OK   ][0m All required files present
+
+[1m[0;36m━━━ Step 2 — Backup affected files ━━━[0m
+[0;34m[2026-09-28T12:32:17Z][INFO ][0m Backed up: lib/supabase/types.ts
+[0;34m[2026-09-28T12:32:17Z][INFO ][0m Backed up: lib/types/index.ts
+[0;34m[2026-09-28T12:32:17Z][INFO ][0m Backed up: lib/notifications/types.ts
+[0;34m[2026-09-28T12:32:18Z][INFO ][0m Backed up: lib/notifications/queries.ts
+[0;34m[2026-09-28T12:32:18Z][INFO ][0m Backed up: app/actions/notifications.ts
+[0;32m[2026-09-28T12:32:19Z][OK   ][0m Backups saved to: /d/setu/.fix-backups/20260928T123214Z
+
+[1m[0;36m━━━ Step 3 — Patch lib/supabase/types.ts ━━━[0m
+[0;34m[2026-09-28T12:32:19Z][INFO ][0m Adding notifications table to Tables map...
+[0;32m[2026-09-28T12:32:21Z][OK   ][0m Inserted notifications table
+[0;34m[2026-09-28T12:32:21Z][INFO ][0m Adding NotificationRow alias...
+[0;32m[2026-09-28T12:32:22Z][OK   ][0m Added NotificationRow alias
+[0;34m[2026-09-28T12:32:22Z][INFO ][0m Adding NotificationInsert alias...
+[0;32m[2026-09-28T12:32:22Z][OK   ][0m Added NotificationInsert alias
+[0;34m[2026-09-28T12:32:23Z][INFO ][0m Adding NotificationUpdate alias...
+[0;32m[2026-09-28T12:32:23Z][OK   ][0m Added NotificationUpdate alias
+[0;34m[2026-09-28T12:32:24Z][INFO ][0m Adding NotificationKind literal union...
+[0;32m[2026-09-28T12:32:24Z][OK   ][0m Added NotificationKind union
+[0;32m[2026-09-28T12:32:25Z][OK   ][0m types.ts patch verified (5/5 sections present)
+
+[1m[0;36m━━━ Step 4 — Rewrite lib/notifications/types.ts ━━━[0m
+[0;32m[2026-09-28T12:32:26Z][OK   ][0m Wrote lib/notifications/types.ts
+
+[1m[0;36m━━━ Step 5 — Rewrite lib/notifications/queries.ts ━━━[0m
+[0;32m[2026-09-28T12:32:28Z][OK   ][0m Wrote lib/notifications/queries.ts
+
+[1m[0;36m━━━ Step 6 — Rewrite app/actions/notifications.ts ━━━[0m
+[0;32m[2026-09-28T12:32:29Z][OK   ][0m Wrote app/actions/notifications.ts
+
+[1m[0;36m━━━ Step 7 — Patch lib/types/index.ts ━━━[0m
+[0;34m[2026-09-28T12:32:29Z][INFO ][0m Adding notification re-exports...
+[0;32m[2026-09-28T12:32:31Z][OK   ][0m lib/types/index.ts patched (4/4 sections)
+
+[1m[0;36m━━━ Step 8 — Configure npm allow-scripts ━━━[0m
+[0;34m[2026-09-28T12:32:32Z][INFO ][0m Adding allow-scripts entry to .npmrc...
+[0;32m[2026-09-28T12:32:32Z][OK   ][0m Updated .npmrc
+
+[1m[0;36m━━━ Step 9 — Verify with TypeScript ━━━[0m
+[0;34m[2026-09-28T12:32:33Z][INFO ][0m Running typecheck (30–90s)...
+[0;31m[2026-09-28T12:32:51Z][ERROR][0m TypeScript still reporting errors
+components/notifications/notification-bell.tsx(103,13): error TS2554: Expected 1 arguments, but got 0.
+[0;31m[2026-09-28T12:32:52Z][ERROR][0m Full output: /d/setu/.fix-logs/fix-20260928T123214Z.log
+[0;31m[2026-09-28T12:32:52Z][ERROR][0m Restore: ./fix_notifications.sh --restore
