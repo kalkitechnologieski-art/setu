@@ -1,5 +1,18 @@
 "use client";
 
+// components/shared/data-table.tsx
+// ─────────────────────────────────────────────────────────────────────────
+// TanStack Table v9 data table.
+//
+// v9 migration notes:
+//   • useReactTable → useTable(options, selector)
+//   • getCoreRowModel() is gone — the core row model is automatic
+//   • Row models are named slots in tableFeatures()
+//   • globalFilteringFeature is required for globalFilter state
+//   • columnVisibilityFeature gates row.getVisibleCells()
+//   • flexRender() → <table.FlexRender />
+//   • TData must extend RowData
+// ─────────────────────────────────────────────────────────────────────────
 import { useState } from "react";
 import {
   columnFilteringFeature,
@@ -25,6 +38,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
+// Feature registry — module scope for a stable identity across renders.
+// Register a feature before its dependent row-model slot.
 const features = tableFeatures({
   columnFilteringFeature,
   columnVisibilityFeature,
@@ -34,7 +49,9 @@ const features = tableFeatures({
   filteredRowModel: createFilteredRowModel(),
   sortedRowModel: createSortedRowModel(),
   paginatedRowModel: createPaginatedRowModel(),
-  filterFns: { includesString: filterFn_includesString },
+  filterFns: {
+    includesString: filterFn_includesString,
+  },
   sortFns: {
     alphanumeric: sortFn_alphanumeric,
     text: sortFn_text,
@@ -42,6 +59,7 @@ const features = tableFeatures({
   },
 });
 
+// Exported so consuming pages can type their column arrays
 export type DataTableFeatures = typeof features;
 
 interface DataTableProps<TData extends RowData> {
@@ -62,15 +80,25 @@ export function DataTable<TData extends RowData>({
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState<string>("");
 
+  // v9: second argument is a state selector — narrow it to control
+  // which slices trigger re-renders.
   const table = useTable(
     {
       features,
       columns,
       data,
-      state: { sorting, globalFilter },
+      state: {
+        sorting,
+        globalFilter,
+      },
       onSortingChange: setSorting,
       onGlobalFilterChange: setGlobalFilter,
-      initialState: { pagination: { pageIndex: 0, pageSize } },
+      initialState: {
+        pagination: {
+          pageIndex: 0,
+          pageSize,
+        },
+      },
     },
     (state) => ({
       sorting: state.sorting,
