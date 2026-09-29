@@ -1,19 +1,12 @@
-// app/(dashboard)/error.tsx
 "use client";
 
+// app/(dashboard)/error.tsx — Layer 2: Route error boundary.
+// Catches errors in dashboard segment children.
 import { useEffect } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-/**
- * Route-segment error boundary.
- * Catches runtime errors thrown by any child Server/Client Component.
- * Must be a Client Component. Receives { error, reset } from Next.js.
- *
- * error.digest is the server-side correlation ID from Next.js — surface it
- * to the user so support can trace the failure without exposing stack traces.
- */
 export default function DashboardError({
   error,
   reset,
@@ -22,7 +15,6 @@ export default function DashboardError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Forward to your observability backend (Sentry, Axiom, etc.)
     console.error("[dashboard:error]", {
       message: error.message,
       digest: error.digest,

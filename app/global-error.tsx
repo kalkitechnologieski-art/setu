@@ -1,10 +1,7 @@
-// app/global-error.tsx
 "use client";
 
-/**
- * Last-resort error boundary — catches errors thrown by the root layout.
- * Must render its own <html> and <body>. Rarely triggers.
- */
+// app/global-error.tsx — Layer 1: Global error boundary.
+// Catches errors in the root layout. Must render its own <html> and <body>.
 export default function GlobalError({
   error,
   reset,

@@ -1,5 +1,8 @@
 "use client";
 
+// components/shared/data-table.tsx
+// TanStack Table v9 — tableFeatures + useTable with state selector.
+// Migrated from v8: useReactTable → useTable, get*RowModel → tableFeatures slots.
 import { useState } from "react";
 import {
   columnFilteringFeature,
@@ -25,6 +28,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
+// Module-scope feature registration — stable identity across renders.
+// v9: row models are named slots, not option getters.
 const features = tableFeatures({
   columnFilteringFeature,
   columnVisibilityFeature,
@@ -62,6 +67,7 @@ export function DataTable<TData extends RowData>({
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState<string>("");
 
+  // v9: useTable takes (options, selector). Selector narrows re-render scope.
   const table = useTable(
     {
       features,
@@ -92,18 +98,14 @@ export function DataTable<TData extends RowData>({
           />
         </div>
       </div>
-
       <div className="overflow-hidden rounded-xl border bg-card">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="border-b bg-muted/30">
-              {table.getHeaderGroups().map((headerGroup) => (
-                <tr key={headerGroup.id} className="text-left">
-                  {headerGroup.headers.map((header) => (
-                    <th
-                      key={header.id}
-                      className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground"
-                    >
+              {table.getHeaderGroups().map((hg) => (
+                <tr key={hg.id} className="text-left">
+                  {hg.headers.map((header) => (
+                    <th key={header.id} className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {header.isPlaceholder ? null : (
                         <button
                           type="button"
@@ -112,12 +114,8 @@ export function DataTable<TData extends RowData>({
                           disabled={!header.column.getCanSort()}
                         >
                           <table.FlexRender header={header} />
-                          {header.column.getIsSorted() === "asc" && (
-                            <ChevronUp className="size-3" />
-                          )}
-                          {header.column.getIsSorted() === "desc" && (
-                            <ChevronDown className="size-3" />
-                          )}
+                          {header.column.getIsSorted() === "asc" && <ChevronUp className="size-3" />}
+                          {header.column.getIsSorted() === "desc" && <ChevronDown className="size-3" />}
                         </button>
                       )}
                     </th>
@@ -128,19 +126,13 @@ export function DataTable<TData extends RowData>({
             <tbody>
               {table.getRowModel().rows.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={columns.length}
-                    className="px-4 py-12 text-center text-sm text-muted-foreground"
-                  >
+                  <td colSpan={columns.length} className="px-4 py-12 text-center text-sm text-muted-foreground">
                     No results.
                   </td>
                 </tr>
               ) : (
                 table.getRowModel().rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="border-b last:border-b-0 hover:bg-muted/30"
-                  >
+                  <tr key={row.id} className="border-b last:border-b-0 hover:bg-muted/30">
                     {row.getVisibleCells().map((cell) => (
                       <td key={cell.id} className="px-4 py-3 text-sm">
                         <table.FlexRender cell={cell} />
@@ -153,30 +145,14 @@ export function DataTable<TData extends RowData>({
           </table>
         </div>
       </div>
-
       {table.getPageCount() > 1 && (
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">
-            Page {table.state.pagination.pageIndex + 1} of{" "}
-            {table.getPageCount()}
+            Page {table.state.pagination.pageIndex + 1} of {table.getPageCount()}
           </span>
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
-            >
-              Next
-            </Button>
+            <Button variant="outline" size="sm" onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>Previous</Button>
+            <Button variant="outline" size="sm" onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>Next</Button>
           </div>
         </div>
       )}

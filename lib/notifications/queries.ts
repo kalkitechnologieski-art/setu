@@ -2,8 +2,8 @@
 import { createClient } from "@/lib/supabase/server";
 import {
   NOTIFICATION_KINDS, resolveKind,
-  type NotificationAggregate, type NotificationKind,
-  type NotificationRow,
+  type NotificationAggregate, type NotificationFilters,
+  type NotificationKind, type NotificationRow,
 } from "./types";
 
 const DEFAULT_LIMIT = 30;
@@ -11,16 +11,25 @@ const MAX_LIMIT = 200;
 
 export async function listNotifications(
   userId: string,
-  limit = DEFAULT_LIMIT
+  limit = DEFAULT_LIMIT,
+  filters: NotificationFilters = {}
 ): Promise<NotificationRow[]> {
   const supabase = await createClient();
   const effectiveLimit = Math.max(1, Math.min(limit, MAX_LIMIT));
-  const { data, error } = await supabase
+
+  let query = supabase
     .from("notifications")
     .select("id, user_id, title, body, kind, link, read_at, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(effectiveLimit);
+
+  if (filters.unreadOnly) query = query.is("read_at", null);
+  if (filters.kinds && filters.kinds.length > 0) query = query.in("kind", filters.kinds);
+  if (filters.since) query = query.gte("created_at", filters.since);
+  if (filters.until) query = query.lte("created_at", filters.until);
+
+  const { data, error } = await query;
   if (error) return [];
   return (data ?? []) as NotificationRow[];
 }

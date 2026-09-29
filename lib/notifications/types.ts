@@ -1,20 +1,17 @@
 // lib/notifications/types.ts
+// Single source of truth for the notification domain.
 import type { Database } from "@/lib/supabase/types";
 
-export type NotificationRow =
-  Database["public"]["Tables"]["notifications"]["Row"];
-export type NotificationInsert =
-  Database["public"]["Tables"]["notifications"]["Insert"];
-export type NotificationUpdate =
-  Database["public"]["Tables"]["notifications"]["Update"];
+export type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
+export type NotificationInsert = Database["public"]["Tables"]["notifications"]["Insert"];
+export type NotificationUpdate = Database["public"]["Tables"]["notifications"]["Update"];
 
 export type NotificationKind =
   | "info" | "success" | "warning" | "error"
   | "approval" | "signal" | "call" | "content";
 
 export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
-  "info", "success", "warning", "error",
-  "approval", "signal", "call", "content",
+  "info", "success", "warning", "error", "approval", "signal", "call", "content",
 ] as const;
 
 export const KIND_STYLE: Record<NotificationKind, string> = {
@@ -39,6 +36,13 @@ export function resolveKind(v: string | null | undefined): NotificationKind {
   return (NOTIFICATION_KINDS as readonly string[]).includes(v ?? "")
     ? (v as NotificationKind)
     : "info";
+}
+
+export interface NotificationFilters {
+  unreadOnly?: boolean;
+  kinds?: NotificationKind[];
+  since?: string;
+  until?: string;
 }
 
 export interface NotificationAggregate {

@@ -21,6 +21,19 @@
   --color-input: hsl(240 6% 90%);
   --color-ring: hsl(262 83% 58%);
   --radius: 0.75rem;
+  /* ─── Motion tokens ──────────────────────────────────────── */
+  --duration-instant: 80ms;
+  --duration-fast: 180ms;
+  --duration-normal: 350ms;
+  --duration-slow: 500ms;
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --ease-accelerate: cubic-bezier(0.4, 0, 1, 1);
+
+  /* ─── Surface tokens ─────────────────────────────────────── */
+  --surface-raised: hsl(0 0% 100%);
+  --surface-overlay: hsl(0 0% 100%);
+  --surface-sunken: hsl(240 5% 98%);
 }
 
 .dark {
@@ -43,6 +56,9 @@
   --color-border: hsl(240 5% 20%);
   --color-input: hsl(240 5% 20%);
   --color-ring: hsl(263 70% 65%);
+  --surface-raised: hsl(240 8% 8%);
+  --surface-overlay: hsl(240 8% 8%);
+  --surface-sunken: hsl(240 10% 4%);
 }
 
 @layer base {

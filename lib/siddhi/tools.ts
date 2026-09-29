@@ -1,12 +1,9 @@
 // lib/siddhi/tools.ts
+// Context tools for report-first briefings. Every read tool is safe to call.
 import { createClient } from "@/lib/supabase/server";
 import {
-  getDashboardSummary,
-  getAgents,
-  getFunnelData,
-  getRecentActivity,
-  getPendingChains,
-  getPlatformBreakdown,
+  getDashboardSummary, getAgents, getFunnelData,
+  getRecentActivity, getPendingChains, getPlatformBreakdown,
   getGovernanceEvents,
 } from "@/lib/ops/queries";
 import { listContentPosts, getContentStats } from "@/lib/content/queries";
@@ -15,6 +12,66 @@ import { SIDDHI_WRITE_TOOLS } from "./write-tools";
 
 function ok(data: unknown): SiddhiToolResult { return { ok: true, data }; }
 function fail(error: string): SiddhiToolResult { return { ok: false, error }; }
+
+async function userContextHandler(
+  _args: Record<string, unknown>,
+  userId: string
+): Promise<SiddhiToolResult> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("user_context_snapshots")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) return fail(error.message);
+  if (!data) {
+    return ok({
+      identity: {}, activity: {}, business_state: {},
+      preferences: {}, behavioral_patterns: {},
+      last_computed_at: null,
+    });
+  }
+  return ok(data);
+}
+
+async function pendingDecisionsHandler(
+  _args: Record<string, unknown>,
+  userId: string
+): Promise<SiddhiToolResult> {
+  const supabase = await createClient();
+  const [approvalsRes, signalsRes, convsRes] = await Promise.all([
+    supabase.from("approvals")
+      .select("id, agent_name, action, reasoning, confidence, risk_level, created_at")
+      .eq("user_id", userId).eq("status", "pending")
+      .order("created_at", { ascending: false }).limit(20),
+    supabase.from("signals")
+      .select("id, title, urgency, source, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false }).limit(10),
+    supabase.from("conversations")
+      .select("id, channel, subject, last_message_preview, sentiment, unread_count")
+      .eq("user_id", userId).eq("status", "open")
+      .order("last_message_at", { ascending: false }).limit(10),
+  ]);
+  return ok({
+    approvals: approvalsRes.data ?? [],
+    signals: signalsRes.data ?? [],
+    conversations: convsRes.data ?? [],
+    total:
+      (approvalsRes.data ?? []).length +
+      (signalsRes.data ?? []).length +
+      (convsRes.data ?? []).length,
+  });
+}
+
+async function businessHealthHandler(
+  _args: Record<string, unknown>,
+  userId: string
+): Promise<SiddhiToolResult> {
+  const summary = await getDashboardSummary(userId);
+  const platforms = await getPlatformBreakdown(userId);
+  return ok({ summary, platforms });
+}
 
 async function listLeadsHandler(
   args: Record<string, unknown>,
@@ -99,22 +156,9 @@ async function campaignsHandler(_args: Record<string, unknown>, userId: string) 
   return ok({ campaigns: data ?? [] });
 }
 
-async function emailPerformanceHandler(_args: Record<string, unknown>, userId: string) {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("emails")
-    .select("status, sent_at, opened_at")
-    .eq("status", "sent")
-    .limit(500);
-  if (error) return fail(error.message);
-  const sent = (data ?? []).length;
-  const opened = (data ?? []).filter((e) => e.opened_at).length;
-  void userId;
-  return ok({
-    emails_sent: sent,
-    emails_opened: opened,
-    open_rate: sent > 0 ? (opened / sent) * 100 : 0,
-  });
+async function contentStatsHandler(_args: Record<string, unknown>, userId: string) {
+  const stats = await getContentStats(userId);
+  return ok(stats);
 }
 
 async function listContentHandler(
@@ -126,16 +170,28 @@ async function listContentHandler(
   return ok({ posts, count: posts.length });
 }
 
-async function contentStatsHandler(_args: Record<string, unknown>, userId: string) {
-  const stats = await getContentStats(userId);
-  return ok(stats);
-}
-
 const READ_TOOLS: SiddhiToolDefinition[] = [
   {
+    name: "get_user_context",
+    description: "Get the full context snapshot for the current user: identity, activity, business state, preferences, behavioral patterns.",
+    parameters: { type: "object", properties: {} },
+    handler: userContextHandler,
+  },
+  {
+    name: "get_pending_decisions",
+    description: "Get all decisions waiting on the user: pending approvals, new signals, open conversations.",
+    parameters: { type: "object", properties: {} },
+    handler: pendingDecisionsHandler,
+  },
+  {
+    name: "get_business_health",
+    description: "Get overall account health: leads, campaigns, approvals, AI runs, spend, conversions, ROAS, platform breakdown.",
+    parameters: { type: "object", properties: {} },
+    handler: businessHealthHandler,
+  },
+  {
     name: "list_leads",
-    description:
-      "Fetch the user's leads. Optionally filter by status or minimum ICP score.",
+    description: "Fetch the user's leads. Optionally filter by status or minimum ICP score.",
     parameters: {
       type: "object",
       properties: {
@@ -201,25 +257,19 @@ const READ_TOOLS: SiddhiToolDefinition[] = [
     handler: campaignsHandler,
   },
   {
-    name: "get_email_performance",
-    description: "Get email sending and open rates.",
+    name: "get_content_stats",
+    description: "Get counts of drafts, scheduled, published, pending posts.",
     parameters: { type: "object", properties: {} },
-    handler: emailPerformanceHandler,
+    handler: contentStatsHandler,
   },
   {
     name: "list_content_posts",
-    description: "List the user's content posts (drafts, scheduled, published).",
+    description: "List the user's content posts.",
     parameters: {
       type: "object",
       properties: { limit: { type: "integer", minimum: 1, maximum: 50 } },
     },
     handler: listContentHandler,
-  },
-  {
-    name: "get_content_stats",
-    description: "Get counts of drafts, scheduled, published, pending posts.",
-    parameters: { type: "object", properties: {} },
-    handler: contentStatsHandler,
   },
 ];
 

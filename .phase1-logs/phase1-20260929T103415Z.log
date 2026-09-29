@@ -153,3 +153,25 @@ Route (app)
 [0;32m[2026-09-29T10:35:54Z][OK   ][0m Build succeeded in 24s
 
 [1m[0;36m>>> Step 16 — Git push[0m
+[0;32m[2026-09-29T10:35:55Z][OK   ][0m Committed
+To https://github.com/kalkitechnologieski-art/setu.git
+   c0c2c6b..a01cb45  main -> main
+[0;32m[2026-09-29T10:36:02Z][OK   ][0m Pushed — Netlify will deploy
+
+[1m[0;36m>>> Step 17 — Health check[0m
+[0;34m[2026-09-29T10:36:02Z][INFO ][0m Waiting 60s for Netlify...
+[1;33m[2026-09-29T10:37:11Z][WARN ][0m Attempt 1 of 5 failed, retrying in 10s
+[1;33m[2026-09-29T10:37:24Z][WARN ][0m Attempt 2 of 5 failed, retrying in 20s
+[1;33m[2026-09-29T10:37:52Z][WARN ][0m Attempt 3 of 5 failed, retrying in 40s
+[1;33m[2026-09-29T10:38:40Z][WARN ][0m Attempt 4 of 5 failed, retrying in 80s
+[0;31m[2026-09-29T10:40:08Z][ERROR][0m Failed after 5 attempts: curl
+-sf
+--max-time
+20
+__SET_ME__/api/health
+[1;33m[2026-09-29T10:40:08Z][WARN ][0m Health endpoint unreachable — Netlify may still be building
+[0;31m[2026-09-29T10:40:08Z][ERROR][0m Failure at line 1751 with exit code 127
+[0;31m[2026-09-29T10:40:09Z][ERROR][0m Pipeline aborted with exit code 127
+[0;31m[2026-09-29T10:40:09Z][ERROR][0m Log:     /d/setu/.phase1-logs/phase1-20260929T103415Z.log
+[0;31m[2026-09-29T10:40:10Z][ERROR][0m Backups: /d/setu/.phase1-backups/20260929T103415Z
+[0;31m[2026-09-29T10:40:10Z][ERROR][0m Restore: cp /d/setu/.phase1-backups/20260929T103415Z/<relative-path> /d/setu/<relative-path>
