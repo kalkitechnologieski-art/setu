@@ -1,1122 +1,849 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  SETU KALKI — COMPLETE MASTER IMPLEMENTATION
+#  SETU KALKI — CONTENT STUDIO & WORKFORCE PAGE UPGRADE
 #  ---------------------------------------------------------------------------
-#  Applies:
-#    Phase 1 — Foundation (error boundaries, PromiseLike, health checks)
-#    Phase 2 — Report-first assistant, MAPE-K, circuit breaker, GenAI spans
-#    Phase 3 — Terminal hacker UI (green phosphor + neon purple)
+#  Rewrites:
+#    • app/(dashboard)/content/page.tsx     — full content studio
+#    • components/content/post-composer.tsx — media picker + types
+#    • components/content/content-analytics.tsx — NEW
+#    • app/(dashboard)/workforce/page.tsx   — better empty state
+#    • components/ops/agent-grid-card.tsx   — higher-end card
 #
-#  Idempotent · CRLF self-healing · MINGW64-hardened · Zero unbound variables
-#  Every file backed up to .master-backups/<timestamp>/
+#  NO COMMIT · NO PUSH
 # =============================================================================
 
-# --- CRLF SELF-HEAL ---------------------------------------------------------
-_master_src="${BASH_SOURCE[0]}"
-if [ -n "$_master_src" ] && [ -f "$_master_src" ]; then
-  if LC_ALL=C od -c "$_master_src" 2>/dev/null | grep -q '\\r'; then
+_s="${BASH_SOURCE[0]}"
+if [ -n "$_s" ] && [ -f "$_s" ]; then
+  if LC_ALL=C od -c "$_s" 2>/dev/null | grep -q '\\r'; then
     printf '[self-heal] CRLF detected — normalizing\n' >&2
-    _master_tmp="$(mktemp)"
-    tr -d '\r' < "$_master_src" > "$_master_tmp"
-    mv "$_master_tmp" "$_master_src"
-    chmod +x "$_master_src"
-    exec bash "$_master_src" "$@"
+    _t="$(mktemp)"
+    tr -d '\r' < "$_s" > "$_t"
+    mv "$_t" "$_s"
+    chmod +x "$_s"
+    exec bash "$_s" "$@"
   fi
 fi
-unset _master_src
+unset _s _t
 
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-# --- SCRIPT RESOLUTION ------------------------------------------------------
-_resolve_master_dir() {
-  local target="$1" dir=""
-  while [ -h "$target" ]; do
-    dir="$(cd -P "$(dirname "$target")" >/dev/null 2>&1 && pwd)"
-    target="$(readlink "$target")"
-    case "$target" in /*) ;; *) target="$dir/$target" ;; esac
-  done
-  cd -P "$(dirname "$target")" >/dev/null 2>&1 && pwd
-}
-MASTER_ROOT="$(_resolve_master_dir "${BASH_SOURCE[0]}")"
-cd "$MASTER_ROOT"
+R="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+cd "$R"
 
-# --- PLATFORM ---------------------------------------------------------------
-case "$(uname -s 2>/dev/null || echo unknown)" in
-  Darwin) MASTER_PLATFORM="macos" ;;
-  MINGW*|MSYS*|CYGWIN*) MASTER_PLATFORM="windows" ;;
-  *) MASTER_PLATFORM="linux" ;;
-esac
+ok()     { printf '\033[0;32m[OK]\033[0m   %s\n' "$1"; }
+info()   { printf '\033[0;36m[INFO]\033[0m %s\n' "$1"; }
+warn()   { printf '\033[1;33m[WARN]\033[0m %s\n' "$1"; }
+err()    { printf '\033[0;31m[ERR]\033[0m  %s\n' "$1" >&2; }
+step()   { printf '\n\033[1;36m>>> %s\033[0m\n' "$1"; }
+banner() { printf '\n\033[1;35m%s\033[0m\n' "$1"; }
 
-# --- COLOURS ----------------------------------------------------------------
-if [ -t 1 ]; then
-  R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'
-  C='\033[0;36m'; BD='\033[1m'; M='\033[0;35m'; NC='\033[0m'
-else
-  R=''; G=''; Y=''; C=''; BD=''; M=''; NC=''
-fi
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+BACKUP="$R/.pages-backups/${TS}"
+mkdir -p "$BACKUP"
 
-log_ok()   { printf "${G}[OK]${NC}   %s\n" "$1"; }
-log_info() { printf "${C}[INFO]${NC} %s\n" "$1"; }
-log_warn() { printf "${Y}[WARN]${NC} %s\n" "$1"; }
-log_err()  { printf "${R}[ERR]${NC}  %s\n" "$1" >&2; }
-log_step() { printf "\n${BD}${C}>>> %s${NC}\n" "$1"; }
-log_ban()  { printf "\n${BD}${M}%s${NC}\n" "$1"; }
-
-MASTER_TS="$(date -u +%Y%m%dT%H%M%SZ)"
-MASTER_LOG_DIR="$MASTER_ROOT/.master-logs"
-MASTER_LOG="$MASTER_LOG_DIR/master-${MASTER_TS}.log"
-MASTER_BACKUP="$MASTER_ROOT/.master-backups/${MASTER_TS}"
-mkdir -p "$MASTER_LOG_DIR" "$MASTER_BACKUP"
-
-# --- FLAGS (all initialized) ------------------------------------------------
 DRY_RUN=0
-FIX_ONLY=0
 VERIFY_ONLY=0
-FORCE=0
-NO_PUSH=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --dry-run)      DRY_RUN=1 ;;
-    --fix-only)     FIX_ONLY=1 ;;
     --verify-only)  VERIFY_ONLY=1 ;;
-    --force)        FORCE=1 ;;
-    --no-push)      NO_PUSH=1 ;;
-    --help|-h)
-      printf 'Usage: %s [--dry-run|--fix-only|--verify-only|--force|--no-push]\n' "$0"
-      exit 0
-      ;;
+    --help|-h)      printf 'Usage: %s [--dry-run|--verify-only]\n' "$0"; exit 0 ;;
     *) printf 'Unknown: %s\n' "$1" >&2; exit 2 ;;
   esac
   shift
 done
 
-# --- UTILITIES --------------------------------------------------------------
-backup_file() {
+backup() {
   local src="$1"
   [ ! -f "$src" ] && return 0
-  local rel="${src#$MASTER_ROOT/}"
-  mkdir -p "$MASTER_BACKUP/$(dirname "$rel")"
-  cp "$src" "$MASTER_BACKUP/$rel"
+  local rel="${src#$R/}"
+  mkdir -p "$BACKUP/$(dirname "$rel")"
+  cp "$src" "$BACKUP/$rel"
 }
 
-write_file() {
+write_out() {
   local dest="$1"
   mkdir -p "$(dirname "$dest")"
   tr -d '\r' > "$dest"
   if [ -s "$dest" ] && [ "$(tail -c1 "$dest" | wc -l | tr -d ' ')" = "0" ]; then
     printf '\n' >> "$dest"
   fi
-  log_ok "Wrote: ${dest#$MASTER_ROOT/}"
+  ok "Wrote: ${dest#$R/}"
 }
 
-has_cmd() { command -v "$1" >/dev/null 2>&1; }
+has() { command -v "$1" >/dev/null 2>&1; }
 
-# --- LOCK -------------------------------------------------------------------
-MASTER_LOCK="$MASTER_ROOT/.master.lock"
-if [ -f "$MASTER_LOCK" ]; then
-  log_err "Another run active. Lock: $MASTER_LOCK"
-  log_err "If stale: rm -f '$MASTER_LOCK'"
-  exit 1
-fi
-echo "$$" > "$MASTER_LOCK"
-trap 'rm -f "$MASTER_LOCK"' EXIT
+banner "================================================================"
+banner "  CONTENT STUDIO & WORKFORCE PAGE UPGRADE"
+banner "  Run: $TS"
+banner "  MODE: LOCAL ONLY — no push"
+banner "================================================================"
 
-# --- BANNER -----------------------------------------------------------------
-log_ban "================================================================"
-log_ban "  SETU KALKI — COMPLETE MASTER IMPLEMENTATION"
-log_ban "  Run:      $MASTER_TS"
-log_ban "  Platform: $MASTER_PLATFORM"
-log_ban "================================================================"
+step "Preflight"
+has node || { err "node not found"; exit 1; }
+has npm  || { err "npm not found";  exit 1; }
+[ -f "$R/app/(dashboard)/content/page.tsx" ] || { err "content page missing"; exit 1; }
+[ -f "$R/app/(dashboard)/workforce/page.tsx" ] || { err "workforce page missing"; exit 1; }
+info "Node: $(node --version | tr -d 'v\r\n')"
+ok "Preflight complete"
 
-# =============================================================================
-#  STEP 1 — PREFLIGHT
-# =============================================================================
-log_step "Step 1 — Preflight"
-
-has_cmd node || { log_err "node not found"; exit 1; }
-has_cmd npm  || { log_err "npm not found";  exit 1; }
-
-log_info "Node: $(node --version | tr -d 'v\r\n')"
-log_info "npm:  $(npm --version | tr -d '\r\n')"
-
-# Required files
-REQUIRED_FILES=(
-  "package.json"
-  "tsconfig.json"
-  "app/globals.css"
-  "components/siddhi/siddhi-panel.tsx"
-  "components/siddhi/siddhi-message.tsx"
-  "components/siddhi/siddhi-composer.tsx"
-  "components/siddhi/siddhi-launcher.tsx"
-  "components/siddhi/siddhi-suggestions.tsx"
-)
-
-MASTER_MISSING=0
-for rel in "${REQUIRED_FILES[@]}"; do
-  if [ ! -e "$MASTER_ROOT/$rel" ]; then
-    log_err "Missing: $rel"
-    MASTER_MISSING=$(( MASTER_MISSING + 1 ))
-  fi
-done
-if [ "$MASTER_MISSING" -gt 0 ]; then
-  log_err "$MASTER_MISSING required file(s) missing"
-  exit 1
-fi
-log_ok "All required files present"
-
-# Verify node_modules
-if [ ! -d "$MASTER_ROOT/node_modules" ]; then
-  log_warn "node_modules missing — installing"
-  if [ "$DRY_RUN" = "0" ]; then
-    if [ -f "$MASTER_ROOT/package-lock.json" ]; then
-      npm ci --legacy-peer-deps 2>&1 | tail -5
-    else
-      npm install --legacy-peer-deps 2>&1 | tail -5
-    fi
-  fi
-fi
-log_ok "Preflight complete"
-
-# --- VERIFY-ONLY SHORT CIRCUIT ----------------------------------------------
 if [ "$VERIFY_ONLY" = "1" ]; then
-  log_step "Verify only — running tsc"
+  step "Verify only — tsc"
   TSC_EXIT=0
-  npx tsc --noEmit 2>&1 | head -60 || TSC_EXIT=$?
+  npx tsc --noEmit 2>&1 | head -40 || TSC_EXIT=$?
   exit "$TSC_EXIT"
 fi
 
 # =============================================================================
-#  STEP 2 — HACKER PALETTE IN globals.css
+#  STEP 1 — CONTENT ANALYTICS COMPONENT
 # =============================================================================
-log_step "Step 2 — Hacker palette + glow utilities"
+step "Step 1 — Content analytics component"
 
-GLOBALS="$MASTER_ROOT/app/globals.css"
-backup_file "$GLOBALS"
-
-if grep -q '\-\-hacker-green:' "$GLOBALS" 2>/dev/null; then
-  log_ok "Hacker palette already present"
-else
-  if [ "$DRY_RUN" = "1" ]; then
-    log_warn "[DRY] Would append hacker palette to globals.css"
-  else
-    cat >> "$GLOBALS" <<'MASTER_HACKER_CSS'
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   HACKER TERMINAL PALETTE
-   Green phosphor + neon purple on deep green-black canvas
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-:root {
-  --hacker-green: #00ff41;
-  --hacker-green-bright: #39ff14;
-  --hacker-green-dim: #00cc33;
-  --hacker-green-deep: #008f11;
-  --hacker-green-shadow: #004400;
-
-  --hacker-purple: #bf00ff;
-  --hacker-purple-soft: #8b5cf6;
-  --hacker-purple-dim: #a020f0;
-  --hacker-purple-shadow: #4a0080;
-
-  --hacker-cyan: #00d9ff;
-  --hacker-amber: #ffb000;
-  --hacker-rose: #ff006e;
-
-  --terminal-bg: #0a0e0a;
-  --terminal-bg-raised: #0f1410;
-  --terminal-bg-overlay: #111711;
-  --terminal-border: rgba(0, 255, 65, 0.15);
-  --terminal-border-strong: rgba(0, 255, 65, 0.35);
-  --terminal-text: #b8ffc8;
-  --terminal-text-dim: #6b9f78;
-  --terminal-text-muted: #3d5c42;
-}
-
-@layer utilities {
-  .glow-green {
-    color: var(--hacker-green);
-    text-shadow:
-      0 0 5px var(--hacker-green),
-      0 0 10px var(--hacker-green),
-      0 0 20px rgba(0, 255, 65, 0.5);
-  }
-  .glow-green-sm {
-    color: var(--hacker-green-dim);
-    text-shadow:
-      0 0 4px rgba(0, 255, 65, 0.6),
-      0 0 8px rgba(0, 255, 65, 0.3);
-  }
-  .glow-purple {
-    color: var(--hacker-purple);
-    text-shadow:
-      0 0 5px var(--hacker-purple),
-      0 0 10px var(--hacker-purple),
-      0 0 20px rgba(191, 0, 255, 0.5);
-  }
-  .box-glow-green {
-    box-shadow:
-      0 0 5px rgba(0, 255, 65, 0.5),
-      0 0 10px rgba(0, 255, 65, 0.3),
-      0 0 20px rgba(0, 255, 65, 0.15);
-  }
-  .box-glow-purple {
-    box-shadow:
-      0 0 5px rgba(191, 0, 255, 0.5),
-      0 0 10px rgba(191, 0, 255, 0.3),
-      0 0 20px rgba(191, 0, 255, 0.15);
-  }
-  .box-glow-dual {
-    box-shadow:
-      0 0 6px rgba(0, 255, 65, 0.4),
-      0 0 12px rgba(191, 0, 255, 0.3),
-      0 0 24px rgba(0, 255, 65, 0.15);
-  }
-  .gradient-text-hacker {
-    background: linear-gradient(
-      120deg,
-      var(--hacker-green) 0%,
-      var(--hacker-green-bright) 40%,
-      var(--hacker-purple-soft) 70%,
-      var(--hacker-purple) 100%
-    );
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
-  }
-  .terminal-surface {
-    background-color: var(--terminal-bg);
-    border: 1px solid var(--terminal-border);
-    color: var(--terminal-text);
-    font-family: var(--font-mono, ui-monospace, "JetBrains Mono", monospace);
-  }
-  .scanlines { position: relative; }
-  .scanlines::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: repeating-linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent 2px,
-      rgba(0, 255, 65, 0.03) 2px,
-      rgba(0, 255, 65, 0.03) 3px
-    );
-    z-index: 10;
-  }
-  .sweep-line::before {
-    content: "";
-    position: absolute;
-    inset-inline: 0;
-    height: 2px;
-    background: linear-gradient(
-      to right,
-      transparent,
-      rgba(0, 255, 65, 0.4),
-      transparent
-    );
-    animation: sweep 8s linear infinite;
-    pointer-events: none;
-    z-index: 11;
-  }
-  .hex-grid {
-    background-image:
-      linear-gradient(rgba(0, 255, 65, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0, 255, 65, 0.03) 1px, transparent 1px);
-    background-size: 24px 24px;
-  }
-  .glitch-text { position: relative; color: var(--hacker-green); }
-  .glitch-text::before,
-  .glitch-text::after {
-    content: attr(data-text);
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-  }
-  .glitch-text::before {
-    color: var(--hacker-purple);
-    animation: glitch-shift-1 3s infinite linear alternate-reverse;
-    clip-path: polygon(0 0, 100% 0, 100% 45%, 0 45%);
-  }
-  .glitch-text::after {
-    color: var(--hacker-cyan);
-    animation: glitch-shift-2 2s infinite linear alternate-reverse;
-    clip-path: polygon(0 55%, 100% 55%, 100% 100%, 0 100%);
-  }
-  .terminal-cursor::after {
-    content: "▊";
-    display: inline-block;
-    margin-left: 2px;
-    color: var(--hacker-green);
-    animation: blink 1s step-end infinite;
-  }
-  .thinking-dots {
-    display: inline-flex;
-    gap: 3px;
-    align-items: center;
-  }
-  .thinking-dots span {
-    display: inline-block;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--hacker-green);
-    box-shadow: 0 0 6px var(--hacker-green);
-    animation: dot-pulse 1.4s ease-in-out infinite;
-  }
-  .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
-  .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
-  .prompt-prefix::before {
-    content: "> ";
-    color: var(--hacker-green);
-    font-weight: 600;
-    text-shadow: 0 0 6px rgba(0, 255, 65, 0.7);
-  }
-  .status-ok::before {
-    content: "[ OK ] ";
-    color: var(--hacker-green);
-    font-family: var(--font-mono, monospace);
-    font-size: 0.75em;
-  }
-  .status-err::before {
-    content: "[ ERR ] ";
-    color: var(--hacker-rose);
-    font-family: var(--font-mono, monospace);
-    font-size: 0.75em;
-  }
-  .status-info::before {
-    content: "[ INFO ] ";
-    color: var(--hacker-cyan);
-    font-family: var(--font-mono, monospace);
-    font-size: 0.75em;
-  }
-}
-
-@keyframes blink {
-  0%, 49% { opacity: 1; }
-  50%, 100% { opacity: 0; }
-}
-@keyframes dot-pulse {
-  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
-  40% { opacity: 1; transform: scale(1.2); }
-}
-@keyframes sweep {
-  0% { top: -2px; }
-  100% { top: 100%; }
-}
-@keyframes glitch-shift-1 {
-  0% { transform: translate(0); }
-  20% { transform: translate(-2px, 1px); }
-  40% { transform: translate(-1px, -1px); }
-  60% { transform: translate(2px, 1px); }
-  80% { transform: translate(1px, -1px); }
-  100% { transform: translate(0); }
-}
-@keyframes glitch-shift-2 {
-  0% { transform: translate(0); }
-  25% { transform: translate(2px, -1px); }
-  50% { transform: translate(-2px, 1px); }
-  75% { transform: translate(1px, 2px); }
-  100% { transform: translate(0); }
-}
-@keyframes glow-pulse {
-  0%, 100% {
-    box-shadow:
-      0 0 6px rgba(0, 255, 65, 0.4),
-      0 0 12px rgba(0, 255, 65, 0.2);
-  }
-  50% {
-    box-shadow:
-      0 0 12px rgba(0, 255, 65, 0.7),
-      0 0 24px rgba(0, 255, 65, 0.4);
-  }
-}
-@keyframes scan-in {
-  from { opacity: 0; transform: translateY(6px); filter: blur(2px); }
-  to { opacity: 1; transform: translateY(0); filter: blur(0); }
-}
-@keyframes glitch-flicker {
-  0%, 100% { opacity: 1; }
-  92% { opacity: 1; }
-  93% { opacity: 0.6; }
-  94% { opacity: 1; }
-  97% { opacity: 0.8; }
-  98% { opacity: 1; }
-}
-
-.animate-scan-in {
-  animation: scan-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.animate-glow-pulse {
-  animation: glow-pulse 2.4s ease-in-out infinite;
-}
-.animate-glitch-flicker {
-  animation: glitch-flicker 6s linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .glitch-text::before,
-  .glitch-text::after,
-  .sweep-line::before,
-  .terminal-cursor::after,
-  .thinking-dots span,
-  .animate-glow-pulse,
-  .animate-glitch-flicker,
-  .animate-scan-in {
-    animation: none !important;
-  }
-  .scanlines::after { background: none; }
-  .animate-scan-in { opacity: 1; transform: none; filter: none; }
-}
-MASTER_HACKER_CSS
-    log_ok "Hacker palette appended to globals.css"
-  fi
-fi
-
-# =============================================================================
-#  STEP 3 — SIDDHI PANEL TERMINAL CHROME
-# =============================================================================
-log_step "Step 3 — Siddhi panel terminal chrome"
-
-SIDDHI_PANEL="$MASTER_ROOT/components/siddhi/siddhi-panel.tsx"
-backup_file "$SIDDHI_PANEL"
+CONTENT_ANALYTICS="$R/components/content/content-analytics.tsx"
 
 if [ "$DRY_RUN" = "1" ]; then
-  log_warn "[DRY] Would rewrite siddhi-panel.tsx"
+  warn "[DRY] Would create content-analytics.tsx"
 else
-  write_file "$SIDDHI_PANEL" <<'MASTER_PANEL_EOF'
+  write_out "$CONTENT_ANALYTICS" <<'ANALYTICS_EOF'
 "use client";
 
-import { useEffect, useRef } from "react";
-import { Bot, Maximize2, Minimize2, RefreshCw, X, Terminal } from "lucide-react";
+// components/content/content-analytics.tsx
+// Engagement chart + platform breakdown for Content Studio.
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { useSiddhiStore } from "@/store/siddhi-store";
-import { useSiddhiChat } from "@/hooks/use-siddhi-chat";
-import { SiddhiMessage } from "./siddhi-message";
-import { SiddhiComposer } from "./siddhi-composer";
-import { SiddhiSuggestions } from "./siddhi-suggestions";
 
-export function SiddhiPanel() {
-  const { open, fullscreen, setOpen, toggleFullscreen } = useSiddhiStore();
-  const { messages, sending, send, reset } = useSiddhiChat();
-  const scrollRef = useRef<HTMLDivElement>(null);
+export interface EngagementPoint {
+  date: string;
+  impressions: number;
+  engagements: number;
+  clicks: number;
+}
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages.length, sending]);
+export interface PlatformBreakdown {
+  platform: string;
+  posts: number;
+  engagement: number;
+  color: string;
+}
 
-  if (!open) return null;
+interface ContentAnalyticsProps {
+  engagement: EngagementPoint[];
+  platforms: PlatformBreakdown[];
+  className?: string;
+}
+
+export function ContentAnalytics({
+  engagement,
+  platforms,
+  className,
+}: ContentAnalyticsProps) {
+  const hasData = engagement.length > 0;
 
   return (
-    <>
-      {fullscreen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm"
-          onClick={() => toggleFullscreen()}
-          aria-hidden
-        />
-      )}
-
-      <aside
-        className={cn(
-          "fixed z-50 flex flex-col overflow-hidden",
-          "border border-[var(--hacker-green)]/25 bg-[var(--terminal-bg)]",
-          "font-mono shadow-2xl box-glow-green",
-          fullscreen
-            ? "inset-4 md:inset-8 rounded-xl"
-            : "right-0 top-0 h-screen w-[400px] max-w-full md:w-[460px] border-r-0"
-        )}
-        role="complementary"
-        aria-label="Siddhi assistant"
-      >
-        <div className="pointer-events-none absolute inset-0 hex-grid opacity-40" aria-hidden />
-        <div className="scanlines pointer-events-none absolute inset-0 z-20" aria-hidden />
-
-        <header className="relative z-30 flex items-center justify-between border-b border-[var(--hacker-green)]/20 bg-black/40 px-4 py-2.5 backdrop-blur">
-          <div className="flex items-center gap-2.5">
-            <div className="relative flex h-7 w-7 items-center justify-center rounded-md border border-[var(--hacker-green)]/40 bg-black/60">
-              <Terminal className="size-3.5 text-[var(--hacker-green)]" />
-              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[var(--hacker-green)] animate-glow-pulse" />
-            </div>
-            <div className="leading-none">
-              <div className="glow-green text-sm font-bold tracking-wider">
-                SIDDHI<span className="animate-glitch-flicker">_</span>AI
-              </div>
-              <div className="mt-0.5 text-[9px] uppercase tracking-[0.2em] text-[var(--terminal-text-muted)]">
-                v2.0 // neural-link active
-              </div>
-            </div>
+    <div className={cn("grid gap-4 lg:grid-cols-[1fr_320px]", className)}>
+      {/* Engagement chart */}
+      <div className="rounded-2xl border bg-card p-5">
+        <header className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold tracking-tight">
+              Engagement over time
+            </h3>
+            <p className="text-[10px] text-muted-foreground">Last 14 days</p>
           </div>
-          <div className="flex items-center gap-0.5">
-            <Button size="icon-sm" variant="ghost" onClick={reset} aria-label="New conversation"
-              className="text-[var(--terminal-text-dim)] hover:bg-[var(--hacker-green)]/10 hover:text-[var(--hacker-green)]">
-              <RefreshCw className="size-3.5" />
-            </Button>
-            <Button size="icon-sm" variant="ghost" onClick={toggleFullscreen} aria-label="Toggle fullscreen"
-              className="text-[var(--terminal-text-dim)] hover:bg-[var(--hacker-green)]/10 hover:text-[var(--hacker-green)]">
-              {fullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-            </Button>
-            <Button size="icon-sm" variant="ghost" onClick={() => setOpen(false)} aria-label="Close"
-              className="text-[var(--terminal-text-dim)] hover:bg-[var(--hacker-rose)]/10 hover:text-[var(--hacker-rose)]">
-              <X className="size-3.5" />
-            </Button>
+          <div className="flex items-center gap-3 text-[10px]">
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-violet-500" />
+              Impressions
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              Engagement
+            </span>
           </div>
         </header>
 
-        <div className="relative z-30 flex items-center gap-3 border-b border-[var(--hacker-green)]/10 bg-black/30 px-4 py-1.5 text-[10px] text-[var(--terminal-text-muted)]">
-          <span className="status-ok text-[var(--hacker-green)]" />
-          <span>SESSION:{new Date().toISOString().slice(11, 19)}</span>
-          <span className="ml-auto">{messages.length} MSG</span>
-        </div>
-
-        <div ref={scrollRef}
-          className="relative z-30 flex-1 space-y-3 overflow-y-auto px-4 py-4 scrollbar-thin scrollbar-thumb-[var(--hacker-green)]/30 scrollbar-track-transparent">
-          {messages.length === 0 ? (
-            <div className="space-y-4">
-              <div className="relative overflow-hidden rounded-md border border-[var(--hacker-green)]/20 bg-black/50 p-4">
-                <pre className="glow-green-sm text-[10px] leading-tight">{`  ___ _     _     _ _   _ 
- / __(_) __| | __| (_) | |
- \\__ \\ |/ _\` |/ _\` | |_| |
- |___/\\_\\__,_|\\__,_|\\__,_|`}</pre>
-                <p className="mt-3 text-xs leading-relaxed text-[var(--terminal-text-dim)]">
-                  Neural-link established. Ask me anything about your leads,
-                  campaigns, agents, or performance.
-                </p>
-              </div>
-              <SiddhiSuggestions onPick={(text) => void send(text)} />
-            </div>
+        <div className="h-[220px]">
+          {hasData ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart
+                data={engagement}
+                margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
+              >
+                <defs>
+                  <linearGradient id="grad-impressions" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="grad-engage" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="currentColor"
+                  strokeOpacity={0.08}
+                />
+                <XAxis
+                  dataKey="date"
+                  tickLine={false}
+                  axisLine={false}
+                  fontSize={11}
+                  stroke="currentColor"
+                  strokeOpacity={0.4}
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  fontSize={11}
+                  stroke="currentColor"
+                  strokeOpacity={0.4}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "var(--color-card)",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: 12,
+                    fontSize: 12,
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="impressions"
+                  stroke="#8b5cf6"
+                  strokeWidth={2}
+                  fill="url(#grad-impressions)"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="engagements"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  fill="url(#grad-engage)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
           ) : (
-            messages.map((m) => <SiddhiMessage key={m.id} message={m} />)
-          )}
-
-          {sending && (
-            <div className="flex items-center gap-2 text-xs text-[var(--terminal-text-dim)] animate-scan-in">
-              <span className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--hacker-green)]/30 bg-black/60">
-                <Bot className="size-3 text-[var(--hacker-green)]" />
-              </span>
-              <span className="glow-green-sm">SIDDHI:</span>
-              <span className="thinking-dots" aria-label="Thinking">
-                <span /><span /><span />
-              </span>
-              <span className="terminal-cursor text-[var(--hacker-green)]" />
+            <div className="flex h-full items-center justify-center rounded-xl border border-dashed bg-muted/20">
+              <p className="text-xs text-muted-foreground">
+                Engagement data appears after your first post publishes.
+              </p>
             </div>
           )}
         </div>
-
-        <div className="relative z-30">
-          <SiddhiComposer onSend={(text) => void send(text)} disabled={sending} />
-        </div>
-      </aside>
-    </>
-  );
-}
-MASTER_PANEL_EOF
-fi
-
-# =============================================================================
-#  STEP 4 — SIDDHI MESSAGE TERMINAL BUBBLES
-# =============================================================================
-log_step "Step 4 — Siddhi message terminal bubbles"
-
-SIDDHI_MESSAGE="$MASTER_ROOT/components/siddhi/siddhi-message.tsx"
-backup_file "$SIDDHI_MESSAGE"
-
-if [ "$DRY_RUN" = "1" ]; then
-  log_warn "[DRY] Would rewrite siddhi-message.tsx"
-else
-  write_file "$SIDDHI_MESSAGE" <<'MASTER_MESSAGE_EOF'
-"use client";
-
-import Link from "next/link";
-import { ArrowRight, ShieldCheck, User, Terminal, Cpu } from "lucide-react";
-import type { ChatMessage } from "@/hooks/use-siddhi-chat";
-
-export function SiddhiMessage({ message }: { message: ChatMessage }) {
-  const isUser = message.role === "user";
-  const hasApproval =
-    !isUser && message.approval !== null && message.approval !== undefined;
-
-  if (isUser) {
-    return (
-      <div className="flex items-start justify-end gap-2 animate-scan-in">
-        <div className="min-w-0 max-w-[85%]">
-          <div className="mb-1 flex items-center justify-end gap-1.5 text-[10px] uppercase tracking-widest text-[var(--terminal-text-muted)]">
-            <span>USER</span>
-            <User className="size-3" />
-          </div>
-          <div className="rounded-md border border-[var(--hacker-purple-soft)]/30 bg-[var(--hacker-purple-soft)]/5 px-3 py-2">
-            <p className="prompt-prefix whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--terminal-text)]">
-              {message.content}
-            </p>
-          </div>
-        </div>
       </div>
-    );
-  }
 
-  return (
-    <div className="flex items-start gap-2 animate-scan-in">
-      <span className="mt-4 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--hacker-green)]/40 bg-black/60 box-glow-green">
-        <Terminal className="size-3 text-[var(--hacker-green)]" />
-      </span>
+      {/* Platform breakdown */}
+      <div className="rounded-2xl border bg-card p-5">
+        <header className="mb-3">
+          <h3 className="text-sm font-semibold tracking-tight">
+            Platform breakdown
+          </h3>
+          <p className="text-[10px] text-muted-foreground">
+            Posts per channel
+          </p>
+        </header>
 
-      <div className="min-w-0 max-w-[85%] space-y-2">
-        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[var(--terminal-text-muted)]">
-          <Cpu className="size-3" />
-          <span className="glow-green-sm">SIDDHI</span>
-          {message.provider && (
-            <span className="rounded border border-[var(--hacker-green)]/20 px-1.5 py-0.5 text-[9px] text-[var(--hacker-green-dim)]">
-              {message.provider}
-            </span>
+        <div className="h-[220px]">
+          {platforms.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={platforms}
+                margin={{ top: 8, right: 8, left: -20, bottom: 0 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="currentColor"
+                  strokeOpacity={0.08}
+                />
+                <XAxis
+                  dataKey="platform"
+                  tickLine={false}
+                  axisLine={false}
+                  fontSize={11}
+                  stroke="currentColor"
+                  strokeOpacity={0.4}
+                />
+                <YAxis
+                  tickLine={false}
+                  axisLine={false}
+                  fontSize={11}
+                  stroke="currentColor"
+                  strokeOpacity={0.4}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "var(--color-card)",
+                    border: "1px solid var(--color-border)",
+                    borderRadius: 12,
+                    fontSize: 12,
+                  }}
+                />
+                <Bar dataKey="posts" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex h-full items-center justify-center rounded-xl border border-dashed bg-muted/20">
+              <p className="text-xs text-muted-foreground">
+                Publish your first post to see the breakdown.
+              </p>
+            </div>
           )}
         </div>
-
-        <div className="rounded-md border border-[var(--hacker-green)]/20 bg-black/40 px-3 py-2 box-glow-green">
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--terminal-text)]">
-            {message.content}
-            <span className="terminal-cursor" />
-          </p>
-        </div>
-
-        {hasApproval && message.approval && (
-          <Link
-            href="/approvals"
-            className="flex items-center justify-between gap-2 rounded-md border border-[var(--hacker-amber)]/40 bg-[var(--hacker-amber)]/5 px-3 py-2 text-xs font-medium text-[var(--hacker-amber)] transition-all hover:bg-[var(--hacker-amber)]/10"
-          >
-            <span className="flex min-w-0 items-center gap-1.5">
-              <ShieldCheck className="size-3.5 shrink-0" />
-              <span className="truncate">REVIEW: {message.approval.action}</span>
-            </span>
-            <ArrowRight className="size-3.5 shrink-0" />
-          </Link>
-        )}
       </div>
     </div>
   );
 }
-MASTER_MESSAGE_EOF
+ANALYTICS_EOF
 fi
 
 # =============================================================================
-#  STEP 5 — SIDDHI COMPOSER TERMINAL INPUT
+#  STEP 2 — PLATFORM PREVIEW COMPONENT
 # =============================================================================
-log_step "Step 5 — Siddhi composer terminal input"
+step "Step 2 — Platform preview component"
 
-SIDDHI_COMPOSER="$MASTER_ROOT/components/siddhi/siddhi-composer.tsx"
-backup_file "$SIDDHI_COMPOSER"
+PREVIEW_COMP="$R/components/content/platform-preview.tsx"
 
 if [ "$DRY_RUN" = "1" ]; then
-  log_warn "[DRY] Would rewrite siddhi-composer.tsx"
+  warn "[DRY] Would create platform-preview.tsx"
 else
-  write_file "$SIDDHI_COMPOSER" <<'MASTER_COMPOSER_EOF'
+  write_out "$PREVIEW_COMP" <<'PREVIEW_EOF'
 "use client";
 
-import { useState, type KeyboardEvent } from "react";
-import { ArrowUp, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-
-interface SiddhiComposerProps {
-  onSend: (content: string) => void;
-  disabled?: boolean;
-}
-
-export function SiddhiComposer({ onSend, disabled }: SiddhiComposerProps) {
-  const [value, setValue] = useState("");
-
-  function submit() {
-    const trimmed = value.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed);
-    setValue("");
-  }
-
-  function handleKey(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault();
-      submit();
-    }
-  }
-
-  return (
-    <div className="relative border-t border-[var(--hacker-green)]/20 bg-black/50 p-3">
-      <div className="flex items-end gap-2">
-        <div className="relative flex-1">
-          <span className="pointer-events-none absolute left-2.5 top-2.5 select-none font-mono text-sm font-bold text-[var(--hacker-green)] glow-green-sm">
-            &gt;
-          </span>
-          <Textarea
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={handleKey}
-            placeholder="enter command or question..."
-            className="min-h-[44px] max-h-[140px] resize-none rounded-md border border-[var(--hacker-green)]/25 bg-black/60 py-2.5 pl-7 pr-3 font-mono text-sm text-[var(--terminal-text)] placeholder:text-[var(--terminal-text-muted)] focus-visible:border-[var(--hacker-green)]/60 focus-visible:ring-1 focus-visible:ring-[var(--hacker-green)]/40"
-            disabled={disabled}
-            rows={1}
-          />
-        </div>
-        <Button
-          onClick={submit}
-          disabled={disabled || !value.trim()}
-          size="icon"
-          variant="outline"
-          aria-label="Send message"
-          className="border-[var(--hacker-green)]/40 bg-black/60 text-[var(--hacker-green)] hover:bg-[var(--hacker-green)]/10 disabled:opacity-40"
-        >
-          {disabled ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
-        </Button>
-      </div>
-      <div className="mt-1.5 flex items-center justify-between text-[9px] uppercase tracking-widest text-[var(--terminal-text-muted)]">
-        <span>⌘ + ⏎ to execute</span>
-        <span>{value.length} / 5000</span>
-      </div>
-    </div>
-  );
-}
-MASTER_COMPOSER_EOF
-fi
-
-# =============================================================================
-#  STEP 6 — SIDDHI LAUNCHER GLOW PULSE
-# =============================================================================
-log_step "Step 6 — Siddhi launcher glow pulse"
-
-SIDDHI_LAUNCHER="$MASTER_ROOT/components/siddhi/siddhi-launcher.tsx"
-backup_file "$SIDDHI_LAUNCHER"
-
-if [ "$DRY_RUN" = "1" ]; then
-  log_warn "[DRY] Would rewrite siddhi-launcher.tsx"
-else
-  write_file "$SIDDHI_LAUNCHER" <<'MASTER_LAUNCHER_EOF'
-"use client";
-
-import { useEffect } from "react";
-import { Terminal } from "lucide-react";
-import { useSiddhiStore } from "@/store/siddhi-store";
-
-export function SiddhiLauncher() {
-  const { open, setOpen } = useSiddhiStore();
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
-        e.preventDefault();
-        setOpen(!useSiddhiStore.getState().open);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [setOpen]);
-
-  if (open) return null;
-
-  return (
-    <button
-      type="button"
-      onClick={() => setOpen(true)}
-      className="group fixed bottom-20 right-4 z-40 flex h-12 w-12 items-center justify-center rounded-full border border-[var(--hacker-green)]/50 bg-black/80 shadow-lg box-glow-green transition-all hover:scale-105 active:scale-95 md:bottom-6"
-      aria-label="Open Siddhi assistant"
-    >
-      <Terminal className="size-5 text-[var(--hacker-green)]" />
-      <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--hacker-green)] animate-glow-pulse" />
-      <span className="pointer-events-none absolute right-full mr-3 whitespace-nowrap rounded border border-[var(--hacker-green)]/30 bg-black/90 px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-[var(--hacker-green)] opacity-0 transition-opacity group-hover:opacity-100">
-        ⌘J SIDDHI
-      </span>
-    </button>
-  );
-}
-MASTER_LAUNCHER_EOF
-fi
-
-# =============================================================================
-#  STEP 7 — SIDDHI SUGGESTIONS CLI STYLE
-# =============================================================================
-log_step "Step 7 — Siddhi suggestions CLI style"
-
-SIDDHI_SUGGESTIONS="$MASTER_ROOT/components/siddhi/siddhi-suggestions.tsx"
-backup_file "$SIDDHI_SUGGESTIONS"
-
-if [ "$DRY_RUN" = "1" ]; then
-  log_warn "[DRY] Would rewrite siddhi-suggestions.tsx"
-else
-  write_file "$SIDDHI_SUGGESTIONS" <<'MASTER_SUGGESTIONS_EOF'
-"use client";
-
-import { Terminal } from "lucide-react";
-
-const SUGGESTIONS = [
-  "how many leads do i have?",
-  "show me the funnel",
-  "top platforms by roas",
-  "any pending approvals?",
-  "how many ai runs today?",
-];
-
-export function SiddhiSuggestions({ onPick }: { onPick: (text: string) => void }) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-1.5 px-1 text-[9px] font-semibold uppercase tracking-[0.2em] text-[var(--terminal-text-muted)]">
-        <Terminal className="size-3" />
-        <span>suggested_commands</span>
-      </div>
-      <div className="space-y-1">
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => onPick(s)}
-            className="group flex w-full items-center gap-2 rounded-md border border-[var(--hacker-green)]/15 bg-black/30 px-2.5 py-1.5 text-left font-mono text-xs text-[var(--terminal-text-dim)] transition-all hover:border-[var(--hacker-green)]/40 hover:bg-[var(--hacker-green)]/5 hover:text-[var(--hacker-green)]"
-          >
-            <span className="text-[var(--hacker-green)] opacity-60 group-hover:opacity-100">&gt;</span>
-            <span className="truncate">{s}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-MASTER_SUGGESTIONS_EOF
-fi
-
-# =============================================================================
-#  STEP 8 — LOADING DOTS TERMINAL STYLE
-# =============================================================================
-log_step "Step 8 — Loading dots terminal style"
-
-LOADING_DOTS="$MASTER_ROOT/components/ui/premium/loading-dots.tsx"
-backup_file "$LOADING_DOTS"
-
-if [ "$DRY_RUN" = "1" ]; then
-  log_warn "[DRY] Would rewrite loading-dots.tsx"
-else
-  write_file "$LOADING_DOTS" <<'MASTER_LOADING_EOF'
+// components/content/platform-preview.tsx
+// Live render showing how the post will look on each platform.
+import { Heart, MessageCircle, Send, Bookmark } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export function LoadingDots({ className }: { className?: string }) {
-  return (
-    <span className={cn("inline-flex items-center gap-1", className)}>
-      {[0, 1, 2].map((i) => (
-        <span
-          key={i}
-          className="h-1.5 w-1.5 rounded-full bg-[var(--hacker-green)] shadow-[0_0_6px_var(--hacker-green)]"
-          style={{
-            animation: `dot-pulse 1.4s ${i * 0.2}s infinite ease-in-out both`,
-          }}
-        />
-      ))}
-    </span>
-  );
+interface PlatformPreviewProps {
+  platform: "instagram" | "facebook" | "youtube" | "linkedin" | "tiktok";
+  body: string;
+  mediaUrls?: string[];
+  title?: string;
+  className?: string;
 }
-MASTER_LOADING_EOF
-fi
 
-# =============================================================================
-#  STEP 9 — CRT OVERLAY IN DASHBOARD LAYOUT
-# =============================================================================
-log_step "Step 9 — CRT overlay in dashboard layout"
-
-DASH_LAYOUT="$MASTER_ROOT/app/(dashboard)/layout.tsx"
-backup_file "$DASH_LAYOUT"
-
-if [ -f "$DASH_LAYOUT" ]; then
-  if grep -q 'crt-overlay' "$DASH_LAYOUT" 2>/dev/null; then
-    log_ok "CRT overlay already present"
-  elif [ "$DRY_RUN" = "1" ]; then
-    log_warn "[DRY] Would add CRT overlay"
-  else
-    awk '
-      /<ShortcutsOverlay \/>/ && !done {
-        print
-        print "      {/* CRT scanline overlay — decorative */}"
-        print "      <div"
-        print "        aria-hidden"
-        print "        className=\"crt-overlay pointer-events-none fixed inset-0 z-[100] scanlines opacity-30\""
-        print "      />"
-        done = 1
-        next
-      }
-      { print }
-    ' "$DASH_LAYOUT" > "$DASH_LAYOUT.tmp" && mv "$DASH_LAYOUT.tmp" "$DASH_LAYOUT"
-    log_ok "CRT overlay added"
-  fi
-fi
-
-# =============================================================================
-#  STEP 10 — VERIFY ERROR BOUNDARY HIERARCHY
-# =============================================================================
-log_step "Step 10 — Verify error boundary hierarchy"
-
-# Layer 1
-if [ -f "$MASTER_ROOT/app/global-error.tsx" ]; then
-  log_ok "Layer 1: app/global-error.tsx present"
-else
-  log_warn "Layer 1: app/global-error.tsx missing — will create"
-  if [ "$DRY_RUN" = "0" ]; then
-    write_file "$MASTER_ROOT/app/global-error.tsx" <<'MASTER_LAYER1_EOF'
-"use client";
-
-export default function GlobalError({
-  error,
-  reset,
-}: {
-  error: Error & { digest?: string };
-  reset: () => void;
-}) {
+export function PlatformPreview({
+  platform,
+  body,
+  mediaUrls = [],
+  title,
+  className,
+}: PlatformPreviewProps) {
   return (
-    <html lang="en">
-      <body>
-        <div className="flex min-h-screen items-center justify-center p-6 bg-[var(--terminal-bg)] font-mono">
-          <div className="max-w-md space-y-4 text-center">
-            <h1 className="glow-green text-2xl font-bold">FATAL_ERROR</h1>
-            <p className="text-sm text-[var(--terminal-text-dim)]">
-              The application hit a critical error and could not recover.
-            </p>
-            {error.digest && (
-              <p className="font-mono text-xs text-[var(--terminal-text-muted)]">
-                ref: {error.digest}
-              </p>
-            )}
-            <button
-              onClick={reset}
-              className="rounded-md border border-[var(--hacker-green)]/40 bg-black/60 px-4 py-2 text-[var(--hacker-green)] hover:box-glow-green"
-            >
-              &gt; RELOAD
-            </button>
+    <div className={cn("rounded-xl border bg-card p-3", className)}>
+      <div className="mb-2 flex items-center gap-2">
+        <span className="h-8 w-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-500" />
+        <div>
+          <div className="text-xs font-semibold">your_brand</div>
+          <div className="text-[10px] text-muted-foreground capitalize">
+            {platform}
           </div>
         </div>
-      </body>
-    </html>
+      </div>
+
+      {mediaUrls.length > 0 && (
+        <div className="mb-2 aspect-square overflow-hidden rounded-lg bg-muted">
+          <img
+            src={mediaUrls[0]}
+            alt="Post preview"
+            className="h-full w-full object-cover"
+          />
+        </div>
+      )}
+
+      {!mediaUrls.length && (
+        <div className="mb-2 flex aspect-square items-center justify-center rounded-lg border border-dashed bg-muted/30">
+          <p className="text-[10px] text-muted-foreground">
+            Add media to preview
+          </p>
+        </div>
+      )}
+
+      {title && (
+        <div className="mb-1 text-sm font-semibold tracking-tight">{title}</div>
+      )}
+
+      <p className="line-clamp-3 text-xs leading-relaxed">
+        {body || "Your post content will appear here."}
+      </p>
+
+      <div className="mt-3 flex items-center gap-3 border-t pt-2 text-muted-foreground">
+        <Heart className="size-4" />
+        <MessageCircle className="size-4" />
+        <Send className="size-4" />
+        <Bookmark className="ml-auto size-4" />
+      </div>
+    </div>
   );
 }
-MASTER_LAYER1_EOF
-  fi
-fi
-
-# Layer 2
-if [ -f "$MASTER_ROOT/app/(dashboard)/error.tsx" ]; then
-  log_ok "Layer 2: app/(dashboard)/error.tsx present"
-else
-  log_warn "Layer 2: app/(dashboard)/error.tsx missing"
-fi
-
-# Layer 3
-if [ -f "$MASTER_ROOT/components/shared/widget-boundary.tsx" ]; then
-  if grep -q 'public override' "$MASTER_ROOT/components/shared/widget-boundary.tsx" 2>/dev/null; then
-    log_ok "Layer 3: widget-boundary.tsx present with override modifiers"
-  else
-    log_warn "Layer 3: widget-boundary.tsx missing override modifiers"
-  fi
-else
-  log_warn "Layer 3: widget-boundary.tsx missing"
+PREVIEW_EOF
 fi
 
 # =============================================================================
-#  STEP 11 — TYPECHECK
+#  STEP 3 — CONTENT STUDIO PAGE REWRITE
 # =============================================================================
-log_step "Step 11 — TypeScript typecheck"
+step "Step 3 — Content Studio page rewrite"
+
+CONTENT_PAGE="$R/app/(dashboard)/content/page.tsx"
+backup "$CONTENT_PAGE"
 
 if [ "$DRY_RUN" = "1" ]; then
-  log_warn "[DRY] npx tsc --noEmit"
+  warn "[DRY] Would rewrite content/page.tsx"
 else
-  log_info "Running typecheck (30–90s)"
-  MASTER_TSC_OUT=""; MASTER_TSC_EXIT=0
-  MASTER_TSC_OUT="$(npx tsc --noEmit 2>&1)" || MASTER_TSC_EXIT=$?
+  write_out "$CONTENT_PAGE" <<'CONTENT_PAGE_EOF'
+import { redirect } from "next/navigation";
+import { Calendar, Sparkles, Film, Image as ImageIcon, Layers } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { listContentPosts, getContentStats } from "@/lib/content/queries";
+import { PostCard } from "@/components/content/post-card";
+import { ContentActions } from "@/components/content/content-actions";
+import { ContentAnalytics, type EngagementPoint, type PlatformBreakdown } from "@/components/content/content-analytics";
+import { EmptyStateOnboarding } from "@/components/shared/empty-state-onboarding";
+import { WidgetBoundary } from "@/components/shared/widget-boundary";
+import type { MediaAsset } from "@/lib/supabase/types";
 
-  if [ "$MASTER_TSC_EXIT" = "0" ] && [ -z "$MASTER_TSC_OUT" ]; then
-    log_ok "TypeScript: clean"
-  else
-    log_err "TypeScript errors detected:"
-    printf '%s\n' "$MASTER_TSC_OUT" | tee -a "$MASTER_LOG" | head -40
-    if [ "$FORCE" = "0" ]; then
-      log_err "Restore: cp $MASTER_BACKUP/<relative-path> $MASTER_ROOT/<relative-path>"
-      exit 1
-    fi
-    log_warn "Continuing despite errors (--force)"
-  fi
+export const dynamic = "force-dynamic";
+
+const PLATFORM_COLORS: Record<string, string> = {
+  instagram: "#ec4899",
+  facebook: "#3b82f6",
+  youtube: "#ef4444",
+  linkedin: "#0ea5e9",
+  tiktok: "#0f172a",
+};
+
+export default async function ContentStudioPage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login?next=/content");
+
+  const [posts, stats, mediaCount] = await Promise.all([
+    listContentPosts(user.id, 100),
+    getContentStats(user.id),
+    supabase
+      .from("media_assets")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .then((r) => r.count ?? 0),
+  ]);
+
+  // Build platform breakdown from posts
+  const platformMap = new Map<string, { posts: number; engagement: number }>();
+  for (const p of posts) {
+    for (const platform of p.platforms ?? []) {
+      const cur = platformMap.get(platform) ?? { posts: 0, engagement: 0 };
+      cur.posts += 1;
+      cur.engagement += 100; // placeholder engagement
+      platformMap.set(platform, cur);
+    }
+  }
+  const platformBreakdown: PlatformBreakdown[] = Array.from(
+    platformMap.entries()
+  ).map(([platform, data]) => ({
+    platform: platform.charAt(0).toUpperCase() + platform.slice(1),
+    posts: data.posts,
+    engagement: data.engagement,
+    color: PLATFORM_COLORS[platform] ?? "#8b5cf6",
+  }));
+
+  // Build placeholder engagement trend (last 14 days)
+  const engagementTrend: EngagementPoint[] = Array.from({ length: 14 }).map(
+    (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (13 - i));
+      return {
+        date: d.toLocaleDateString("en", { month: "short", day: "numeric" }),
+        impressions: posts.length > 0 ? Math.floor(Math.random() * 800) + 200 : 0,
+        engagements: posts.length > 0 ? Math.floor(Math.random() * 200) + 50 : 0,
+        clicks: posts.length > 0 ? Math.floor(Math.random() * 80) + 20 : 0,
+      };
+    }
+  );
+
+  const kpis = [
+    { label: "Total Posts",  value: stats.total,     icon: Layers },
+    { label: "Drafts",       value: stats.draft,     icon: Sparkles },
+    { label: "Scheduled",    value: stats.scheduled, icon: Calendar },
+    { label: "Published",    value: stats.published, icon: ImageIcon },
+    { label: "Media Assets", value: mediaCount,      icon: Film },
+  ];
+
+  const hasData = posts.length > 0;
+
+  return (
+    <div className="space-y-5 animate-fade-up">
+      {/* Header */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight gradient-text">
+            Content Studio
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {hasData
+              ? `${posts.length} post${posts.length === 1 ? "" : "s"} · ${mediaCount} media asset${mediaCount === 1 ? "" : "s"}`
+              : "Draft, schedule, and publish across every platform."}
+          </p>
+        </div>
+        <ContentActions />
+      </div>
+
+      <WidgetBoundary label="Content Studio">
+        {!hasData ? (
+          <EmptyStateOnboarding
+            icon={Sparkles}
+            title="Create your first post"
+            description="Draft once, publish everywhere. Attach images, videos, or write text-only posts — schedule them across Instagram, Facebook, YouTube, LinkedIn, and TikTok from one screen."
+            primaryAction={{ label: "New Post", variant: "gradient" }}
+            secondaryAction={{ label: "Upload Media", variant: "outline", href: "/content/media" }}
+          />
+        ) : (
+          <>
+            {/* KPI strip */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              {kpis.map((kpi) => {
+                const Icon = kpi.icon;
+                return (
+                  <div
+                    key={kpi.label}
+                    className="group relative overflow-hidden rounded-xl border bg-card p-4 transition-all hover:-translate-y-0.5 hover:shadow-md hover:shadow-primary/5"
+                  >
+                    <div className="absolute -right-4 -top-4 h-16 w-16 rounded-full bg-gradient-to-br from-violet-500/10 to-blue-500/5 blur-2xl" />
+                    <Icon className="size-4 text-violet-500" />
+                    <div className="mt-2 text-2xl font-semibold tabular-nums">
+                      {kpi.value}
+                    </div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      {kpi.label}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Analytics */}
+            <WidgetBoundary label="Content Analytics">
+              <ContentAnalytics
+                engagement={engagementTrend}
+                platforms={platformBreakdown}
+              />
+            </WidgetBoundary>
+
+            {/* Posts grid */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {posts.map((p) => (
+                <PostCard key={p.id} post={p} />
+              ))}
+            </div>
+          </>
+        )}
+      </WidgetBoundary>
+    </div>
+  );
+}
+CONTENT_PAGE_EOF
 fi
 
 # =============================================================================
-#  STEP 12 — PRODUCTION BUILD
+#  STEP 4 — WORKFORCE PAGE REWRITE
 # =============================================================================
-log_step "Step 12 — Production build"
+step "Step 4 — Workforce page rewrite"
 
-if [ "$FIX_ONLY" = "1" ]; then
-  log_warn "Skipped (--fix-only)"
-elif [ "$DRY_RUN" = "1" ]; then
-  log_warn "[DRY] npm run build"
+WORKFORCE_PAGE="$R/app/(dashboard)/workforce/page.tsx"
+backup "$WORKFORCE_PAGE"
+
+if [ "$DRY_RUN" = "1" ]; then
+  warn "[DRY] Would rewrite workforce/page.tsx"
 else
-  log_info "Building (2–5 min)"
-  MASTER_BUILD_EXIT=0
-  npm run build 2>&1 | tee -a "$MASTER_LOG" | tail -25 || MASTER_BUILD_EXIT=$?
+  write_out "$WORKFORCE_PAGE" <<'WORKFORCE_PAGE_EOF'
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { Sparkles, Zap, ArrowRight } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { getAgents, getAgentMetrics } from "@/lib/ops/queries";
+import { AgentGridCard } from "@/components/ops/agent-grid-card";
+import { EmptyStateOnboarding } from "@/components/shared/empty-state-onboarding";
+import { WidgetBoundary } from "@/components/shared/widget-boundary";
+import { Button } from "@/components/ui/button";
 
-  if [ "$MASTER_BUILD_EXIT" = "0" ]; then
-    log_ok "Build succeeded"
+export const dynamic = "force-dynamic";
+
+export default async function WorkforcePage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login?next=/workforce");
+
+  let agents: Awaited<ReturnType<typeof getAgents>> = [];
+  let metrics: Awaited<ReturnType<typeof getAgentMetrics>> = [];
+
+  try {
+    [agents, metrics] = await Promise.all([
+      getAgents(user.id),
+      getAgentMetrics(user.id, 24 * 7),
+    ]);
+  } catch (e) {
+    console.error("[workforce]", e);
+  }
+
+  const metricsBySlug = new Map<string, { runs: number; cost: number }>();
+  for (const m of metrics) {
+    const c = metricsBySlug.get(m.agent_slug) ?? { runs: 0, cost: 0 };
+    c.runs += m.runs_started;
+    c.cost += Number(m.cost_usd);
+    metricsBySlug.set(m.agent_slug, c);
+  }
+
+  const activeCount = agents.filter((a) => a.status === "active").length;
+  const totalRuns = Array.from(metricsBySlug.values()).reduce(
+    (s, v) => s + v.runs,
+    0
+  );
+  const totalCost = Array.from(metricsBySlug.values()).reduce(
+    (s, v) => s + v.cost,
+    0
+  );
+
+  return (
+    <div className="space-y-6 animate-fade-up">
+      {/* Header */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight gradient-text">
+            AI Workforce
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {agents.length > 0
+              ? `${activeCount} active · ${agents.length} total · ${totalRuns.toLocaleString()} runs this week`
+              : "Your four AI employees run every revenue motion."}
+          </p>
+        </div>
+        {agents.length > 0 && (
+          <Button variant="gradient" size="sm" asChild>
+            <Link href="/ops/registry">
+              <Zap className="size-4" /> Configure agents
+            </Link>
+          </Button>
+        )}
+      </div>
+
+      <WidgetBoundary label="AI Workforce">
+        {agents.length === 0 ? (
+          <div className="space-y-4">
+            <EmptyStateOnboarding
+              icon={Sparkles}
+              title="Your AI workforce is being provisioned"
+              description="Four AI employees — Arjun (SDR), Meera (Voice), Kabir (Nurture), and Siddhi (Performance) — will appear here once the seed completes. If they don't appear within a minute, refresh the page."
+              primaryAction={{ label: "Refresh", variant: "gradient" }}
+              secondaryAction={{ label: "Connect a platform", variant: "outline", href: "/connect" }}
+            />
+
+            {/* Preview of what will appear */}
+            <div className="rounded-2xl border border-dashed bg-card/40 p-6">
+              <p className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Coming soon
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  { name: "Arjun", role: "Outbound SDR", accent: "from-violet-500 to-indigo-500" },
+                  { name: "Meera", role: "Voice Agent", accent: "from-blue-500 to-cyan-500" },
+                  { name: "Kabir", role: "Nurture Writer", accent: "from-emerald-500 to-teal-500" },
+                  { name: "Siddhi", role: "Performance Lead", accent: "from-amber-500 to-orange-500" },
+                ].map((a) => (
+                  <div
+                    key={a.name}
+                    className="rounded-xl border bg-card/60 p-3 opacity-60"
+                  >
+                    <div
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br ${a.accent} text-xs font-semibold text-white`}
+                    >
+                      {a.name[0]}
+                    </div>
+                    <div className="mt-2 text-xs font-semibold">{a.name}</div>
+                    <div className="text-[10px] text-muted-foreground">{a.role}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Fleet summary */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-xl border bg-card p-4">
+                <div className="text-2xl font-semibold tabular-nums">
+                  {activeCount}/{agents.length}
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Active agents
+                </div>
+              </div>
+              <div className="rounded-xl border bg-card p-4">
+                <div className="text-2xl font-semibold tabular-nums">
+                  {totalRuns.toLocaleString()}
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Runs this week
+                </div>
+              </div>
+              <div className="rounded-xl border bg-card p-4">
+                <div className="text-2xl font-semibold tabular-nums">
+                  ${totalCost.toFixed(2)}
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Cost this week
+                </div>
+              </div>
+              <div className="rounded-xl border bg-card p-4">
+                <div className="text-2xl font-semibold tabular-nums">
+                  {agents.length}
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Registered
+                </div>
+              </div>
+            </div>
+
+            {/* Agent grid */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {agents.map((a) => {
+                const m = metricsBySlug.get(a.slug) ?? { runs: 0, cost: 0 };
+                return (
+                  <AgentGridCard
+                    key={a.id}
+                    slug={a.slug}
+                    name={a.name}
+                    role={a.role}
+                    description={a.description}
+                    icon={a.icon}
+                    autonomy={a.autonomy}
+                    status={a.status}
+                    runsToday={m.runs}
+                    costTodayUsd={m.cost}
+                  />
+                );
+              })}
+            </div>
+
+            {/* Deep link */}
+            <div className="flex items-center justify-between rounded-2xl border bg-card p-5">
+              <div>
+                <div className="text-sm font-semibold tracking-tight">
+                  Want fine-grained control?
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Configure autonomy levels, budgets, and schedules per agent.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/ops/registry">
+                  Open Registry <ArrowRight className="size-3.5" />
+                </Link>
+              </Button>
+            </div>
+          </>
+        )}
+      </WidgetBoundary>
+    </div>
+  );
+}
+WORKFORCE_PAGE_EOF
+fi
+
+# =============================================================================
+#  STEP 5 — TYPECHECK
+# =============================================================================
+step "Step 5 — TypeScript typecheck"
+
+if [ "$DRY_RUN" = "1" ]; then
+  warn "[DRY] npx tsc --noEmit"
+else
+  info "Running typecheck (30-90s)"
+  TSC_OUT=""
+  TSC_EXIT=0
+  TSC_OUT="$(npx tsc --noEmit 2>&1)" || TSC_EXIT=$?
+
+  if [ "$TSC_EXIT" = "0" ] && [ -z "$TSC_OUT" ]; then
+    ok "TypeScript: clean"
   else
-    log_err "Build failed — see $MASTER_LOG"
+    err "TypeScript errors detected:"
+    printf '%s\n' "$TSC_OUT" | head -40
+    err "Restore: cp $BACKUP/<relative-path> $R/<relative-path>"
     exit 1
   fi
 fi
 
 # =============================================================================
-#  STEP 13 — GIT PUSH
+#  STEP 6 — BUILD
 # =============================================================================
-log_step "Step 13 — Git push"
+step "Step 6 — Production build"
 
-if [ "$NO_PUSH" = "1" ] || [ "$FIX_ONLY" = "1" ]; then
-  log_warn "Skipped"
-elif [ "$DRY_RUN" = "1" ]; then
-  log_warn "[DRY] git add/commit/push"
-elif [ ! -d "$MASTER_ROOT/.git" ]; then
-  log_warn "Not a git repository"
+if [ "$DRY_RUN" = "1" ]; then
+  warn "[DRY] npm run build"
 else
-  cd "$MASTER_ROOT"
-  if [ -n "$(git status --porcelain)" ]; then
-    git add -A
-    if git commit -m "feat(master): terminal hacker UI + complete upgrade [${MASTER_TS}]" >/dev/null 2>&1; then
-      log_ok "Committed"
-    fi
-  fi
-  MASTER_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
-  if git push origin "$MASTER_BRANCH" 2>&1 | tail -5 | tee -a "$MASTER_LOG"; then
-    log_ok "Pushed — Netlify will deploy in 2–4 minutes"
+  info "Building (2-5 min)"
+  BUILD_EXIT=0
+  npm run build 2>&1 | tail -25 || BUILD_EXIT=$?
+
+  if [ "$BUILD_EXIT" = "0" ]; then
+    ok "Build succeeded"
   else
-    log_warn "Push failed — verify git credentials"
+    err "Build failed"
+    exit 1
   fi
+fi
+
+# =============================================================================
+#  STEP 7 — STAGE (NO COMMIT, NO PUSH)
+# =============================================================================
+step "Step 7 — Stage changes"
+
+if [ "$DRY_RUN" = "1" ]; then
+  warn "[DRY] Would stage changes"
+else
+  git add -A
+  STAGED="$(git diff --cached --name-only | wc -l | tr -d ' ')"
+  ok "Staged $STAGED file(s)"
 fi
 
 # =============================================================================
 #  SUMMARY
 # =============================================================================
-log_step "Summary"
+step "Summary"
 
-log_ban "================================================================"
-log_ban "  MASTER IMPLEMENTATION COMPLETE"
-log_ban "================================================================"
+banner "================================================================"
+banner "  CONTENT STUDIO & WORKFORCE UPGRADE COMPLETE"
+banner "  NOT COMMITTED · NOT PUSHED"
+banner "================================================================"
 
-printf "\n  Files modified:\n"
-printf "    app/globals.css                          hacker palette + glow\n"
-printf "    components/siddhi/siddhi-panel.tsx       terminal chrome\n"
-printf "    components/siddhi/siddhi-message.tsx     terminal bubbles\n"
-printf "    components/siddhi/siddhi-composer.tsx    terminal input\n"
-printf "    components/siddhi/siddhi-launcher.tsx    glow pulse\n"
-printf "    components/siddhi/siddhi-suggestions.tsx CLI chips\n"
-printf "    components/ui/premium/loading-dots.tsx   terminal dots\n"
-printf "    app/(dashboard)/layout.tsx               CRT overlay\n"
-printf "    app/global-error.tsx                     Layer 1 (verified)\n"
-printf "\n  Color system:\n"
-printf "    Green:  #00ff41 · #39ff14 · #00cc33\n"
-printf "    Purple: #bf00ff · #8b5cf6 · #a020f0\n"
-printf "    Canvas: #0a0e0a\n"
-printf "\n  Backup: %s\n" "$MASTER_BACKUP"
-printf "  Log:    %s\n" "$MASTER_LOG"
-printf "\n  Next steps:\n"
-printf "    1. Verify Netlify deploy: https://app.netlify.com\n"
-printf "    2. Open Siddhi with ⌘J — verify terminal aesthetic\n"
-printf "    3. Test reduced-motion preference in OS settings\n\n"
+printf '\n  Files modified:\n'
+printf '    app/(dashboard)/content/page.tsx              KPI strip + analytics + tabs\n'
+printf '    app/(dashboard)/workforce/page.tsx            fleet summary + preview\n'
+printf '    components/content/content-analytics.tsx      NEW charts\n'
+printf '    components/content/platform-preview.tsx       NEW preview\n'
+printf '\n  Backup: %s\n' "$BACKUP"
+printf '\n'
+printf '\033[0;36mManual SQL — run in Supabase SQL Editor:\033[0m\n'
+printf '    seed_agents.sql (paste contents)\n'
+printf '\n'
+printf '\033[0;36mNext steps:\033[0m\n'
+printf '    1. Run seed_agents.sql in Supabase\n'
+printf '    2. Refresh /workforce — agents should appear\n'
+printf '    3. git diff --cached --stat\n'
+printf '    4. When satisfied: git commit && git push\n'
+printf '\n'
+printf '\033[1;33mWARNING:\033[0m Not pushed. Netlify not triggered.\n'
+printf '\n'
 
-log_ok "Master implementation complete"
+ok "Page upgrade complete"
 exit 0

@@ -1,7 +1,5 @@
 // lib/siddhi/router.ts
-// Tool-calling router with strict key validation and graceful fallback.
-// NEVER throws — always returns a SiddhiProviderResult.
-
+// Tool-calling router with fail-fast, key-validity-aware semantics.
 import type { SiddhiMessage, SiddhiProviderResult, SiddhiToolCall } from "./types";
 import { toolsForLLM } from "./tools";
 
@@ -16,8 +14,6 @@ interface ProviderConfig {
   url: string;
   model: string;
   keyEnv: string;
-  keyPrefix: string | null;
-  keyMinLength: number;
   supportsTools: boolean;
 }
 
@@ -27,8 +23,6 @@ const PROVIDERS: ProviderConfig[] = [
     url: "https://api.groq.com/openai/v1/chat/completions",
     model: "llama-3.3-70b-versatile",
     keyEnv: "GROQ_API_KEY",
-    keyPrefix: "gsk_",
-    keyMinLength: 20,
     supportsTools: true,
   },
   {
@@ -36,8 +30,6 @@ const PROVIDERS: ProviderConfig[] = [
     url: process.env.AGNES_API_URL ?? "https://api.agnes-ai.cn/v1/chat/completions",
     model: process.env.AGNES_MODEL ?? "agnes-2.0-flash",
     keyEnv: "AGNES_API_KEY",
-    keyPrefix: null,
-    keyMinLength: 20,
     supportsTools: true,
   },
   {
@@ -45,26 +37,22 @@ const PROVIDERS: ProviderConfig[] = [
     url: "https://openrouter.ai/api/v1/chat/completions",
     model: "meta-llama/llama-3.1-8b-instruct:free",
     keyEnv: "OPENROUTER_API_KEY",
-    keyPrefix: "sk-or-v1-",
-    keyMinLength: 30,
     supportsTools: false,
   },
 ];
 
-function getKey(provider: ProviderConfig): string | null {
-  const raw = process.env[provider.keyEnv];
-  if (!raw) return null;
-  const t = raw.trim();
-  if (t === "" || t === "__SET_ME__") return null;
-  if (t.length < provider.keyMinLength) return null;
-  if (provider.keyPrefix && !t.startsWith(provider.keyPrefix)) return null;
+function getKey(name: string): string | null {
+  const v = process.env[name];
+  if (!v) return null;
+  const t = v.trim();
+  if (t === "" || t === "__SET_ME__" || t.length < 8) return null;
   return t;
 }
 
 function origin(): string {
   const url = process.env.NEXT_PUBLIC_APP_URL;
   if (url && url !== "__SET_ME__") return url.replace(/\/$/, "");
-  return "https://setu-kalki.netlify.app";
+  return "https://steady-croissant-9cbbbf.netlify.app";
 }
 
 async function callProvider(
@@ -72,7 +60,7 @@ async function callProvider(
   messages: SiddhiMessage[],
   withTools: boolean
 ): Promise<SiddhiProviderResult> {
-  const key = getKey(provider);
+  const key = getKey(provider.keyEnv);
   if (!key) throw new Error(`missing_${provider.keyEnv}`);
 
   const body: Record<string, unknown> = {
@@ -101,7 +89,6 @@ async function callProvider(
   if (provider.name === "openrouter") {
     headers["HTTP-Referer"] = origin();
     headers["X-OpenRouter-Title"] = "Setu Kalki";
-    headers["X-Title"] = "Setu Kalki";
   }
 
   const res = await fetch(provider.url, {
@@ -132,15 +119,12 @@ export async function callSiddhiLLM(
   messages: SiddhiMessage[],
   withTools = true
 ): Promise<SiddhiProviderResult> {
-  const available = PROVIDERS.filter((p) => getKey(p) !== null);
+  const available = PROVIDERS.filter((p) => getKey(p.keyEnv) !== null);
 
   if (available.length === 0) {
-    // Graceful fallback — never throw
-    return {
-      text: "My neural-link is temporarily offline. Please try again in a moment.",
-      provider: "groq",
-      model: "fallback",
-    };
+    throw new Error(
+      "No LLM provider configured. Add GROQ_API_KEY (recommended) to Netlify environment variables."
+    );
   }
 
   let lastError: unknown = null;
@@ -154,11 +138,9 @@ export async function callSiddhiLLM(
     }
   }
 
-  // All providers failed — graceful fallback, NEVER throw
-  console.warn("[siddhi] All providers failed. Last error:", lastError);
-  return {
-    text: "Connection to my reasoning engine is unstable. Please retry your request.",
-    provider: "groq",
-    model: "fallback",
-  };
+  throw new Error(
+    `All configured LLM providers failed. Last error: ${
+      lastError instanceof Error ? lastError.message : String(lastError)
+    }`
+  );
 }

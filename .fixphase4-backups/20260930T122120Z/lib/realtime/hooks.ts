@@ -1,49 +1,30 @@
 // lib/realtime/hooks.ts
 // Realtime hooks — useSyncExternalStore edition + presence throttle guard.
-// Presence rate limit: 5 updates per 30s per client (Supabase free plan).
+// Presence rate limit: 5 updates per 30s per client. Broadcast for high-frequency.
 "use client";
 
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import {
-  acquireStore,
-  createEmptySnapshot,
-  releaseStore,
-  type RealtimeConnectionStatus,
-  type RealtimeSnapshot,
-  type TrackedRow,
-  type TrackedTable,
+  acquireStore, createEmptySnapshot, releaseStore,
+  type RealtimeSnapshot, type TrackedRow, type TrackedTable,
 } from "./store";
 
-// Re-export types so existing imports keep working
 export type {
-  RealtimeConnectionStatus,
-  RealtimeSnapshot,
-  TrackedRow,
-  TrackedTable,
+  RealtimeConnectionStatus, RealtimeSnapshot, TrackedRow, TrackedTable,
 } from "./store";
 
 export type RealtimeState<T> = RealtimeSnapshot<T>;
 
-// ─── Stable no-op subscribe ──────────────────────────────────────────────
 const noopSubscribe = (): (() => void) => () => { /* noop */ };
 
-// ─── Presence throttle guard ─────────────────────────────────────────────
+// ─── Presence throttle ───────────────────────────────────────────────────
 const presenceTimestamps: number[] = [];
 const PRESENCE_WINDOW_MS = 30_000;
 const PRESENCE_MAX_CALLS = 5;
 
 export function canSendPresenceUpdate(): boolean {
   const now = Date.now();
-  while (
-    presenceTimestamps.length > 0 &&
-    (presenceTimestamps[0] ?? 0) < now - PRESENCE_WINDOW_MS
-  ) {
+  while (presenceTimestamps.length > 0 && (presenceTimestamps[0] ?? 0) < now - PRESENCE_WINDOW_MS) {
     presenceTimestamps.shift();
   }
   if (presenceTimestamps.length >= PRESENCE_MAX_CALLS) return false;
@@ -51,7 +32,7 @@ export function canSendPresenceUpdate(): boolean {
   return true;
 }
 
-// ─── Core table hook ─────────────────────────────────────────────────────
+// ─── Core hook ───────────────────────────────────────────────────────────
 export function useRealtimeTable<K extends TrackedTable>(
   table: K,
   userId: string | null
@@ -68,9 +49,7 @@ export function useRealtimeTable<K extends TrackedTable>(
 
   useEffect(() => {
     if (!store || !userId) return;
-    return () => {
-      releaseStore(table, userId);
-    };
+    return () => { releaseStore(table, userId); };
   }, [store, table, userId]);
 
   const getSnapshot = useCallback(
@@ -88,7 +67,6 @@ export function useRealtimeTable<K extends TrackedTable>(
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-// ─── Derived convenience hooks ───────────────────────────────────────────
 export function useLeads(userId: string | null) {
   return useRealtimeTable("leads", userId);
 }
@@ -101,7 +79,20 @@ export function useAgentRuns(userId: string | null) {
   return useRealtimeTable("agent_runs", userId);
 }
 
-// ─── Connection state (aggregates all stores + browser online state) ─────
+// ─── Connection state across all subscribed stores ───────────────────────
+// Aggregates the "worst" status across every active store into one signal.
+// Used by the topbar to show reconnecting/error state.
+import type { RealtimeConnectionStatus } from "./store";
+
+const STATUS_PRIORITY: Record<RealtimeConnectionStatus, number> = {
+  error: 0,
+  reconnecting: 1,
+  connecting: 2,
+  idle: 3,
+  closed: 4,
+  subscribed: 5,
+};
+
 export interface ConnectionSnapshot {
   status: RealtimeConnectionStatus;
   reconnectAttempt: number;
@@ -110,7 +101,7 @@ export interface ConnectionSnapshot {
 
 export function useConnectionState(): ConnectionSnapshot {
   const [snapshot, setSnapshot] = useState<ConnectionSnapshot>(() => ({
-    status: "idle" as RealtimeConnectionStatus,
+    status: "idle",
     reconnectAttempt: 0,
     isOnline: typeof navigator !== "undefined" ? navigator.onLine : true,
   }));
@@ -118,8 +109,8 @@ export function useConnectionState(): ConnectionSnapshot {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const update = (): void => {
-      setSnapshot((prev: ConnectionSnapshot) => ({
+    const update = () => {
+      setSnapshot((prev) => ({
         ...prev,
         isOnline: navigator.onLine,
       }));
@@ -137,7 +128,7 @@ export function useConnectionState(): ConnectionSnapshot {
 }
 
 // ─── Presence hook ───────────────────────────────────────────────────────
-// Tracks who else is online in the same org. Uses Supabase Presence.
+// Tracks who else is online. Throttled to respect Supabase Presence limits.
 export interface PresenceUser {
   userId: string;
   name: string;
@@ -170,33 +161,24 @@ export function usePresence(
           const state = channel.presenceState() as Record<string, PresenceUser[]>;
           const flat: PresenceUser[] = [];
           for (const arr of Object.values(state)) {
-            for (const u of arr) {
-              if (u.userId !== userId) flat.push(u);
-            }
+            for (const u of arr) flat.push(u);
           }
-          setUsers(flat);
+          setUsers(flat.filter((u) => u.userId !== userId));
         });
 
-        channel.subscribe((status: string) => {
+        channel.subscribe((status) => {
           if (status === "SUBSCRIBED" && !cancelled) {
             void channel.track({
               userId,
               name: "You",
               status: "online",
-              currentPage:
-                typeof window !== "undefined"
-                  ? window.location.pathname
-                  : undefined,
+              currentPage: typeof window !== "undefined" ? window.location.pathname : undefined,
             });
           }
         });
 
-        unsub = () => {
-          void supabase.removeChannel(channel);
-        };
-      } catch {
-        /* swallow — presence is non-critical */
-      }
+        unsub = () => { void supabase.removeChannel(channel); };
+      } catch { /* swallow — presence is non-critical */ }
     })();
 
     return () => {

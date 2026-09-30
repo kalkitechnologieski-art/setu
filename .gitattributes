@@ -1,0 +1,68 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Setu Kalki — Git line-ending policy
+# Normalizes all text files to LF in the repo, regardless of OS.
+# Windows users still get LF for shell scripts (critical for bash execution).
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Default: normalize to LF on commit, no conversion on checkout for scripts
+* text=auto eol=lf
+
+# Shell scripts MUST be LF — CRLF breaks bash execution
+*.sh text eol=lf
+*.bash text eol=lf
+*.zsh text eol=lf
+
+# TypeScript / JavaScript
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+
+# Config
+*.json text eol=lf
+*.jsonc text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.config text eol=lf
+
+# Styles
+*.css text eol=lf
+*.scss text eol=lf
+*.sass text eol=lf
+
+# Docs
+*.md text eol=lf
+*.mdx text eol=lf
+*.txt text eol=lf
+
+# SQL
+*.sql text eol=lf
+
+# Env files
+.env* text eol=lf
+
+# Binary files — do not touch
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.svg text eol=lf
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
+
+# Lockfiles — leave as-is
+package-lock.json -text
+yarn.lock -text
+pnpm-lock.yaml -text

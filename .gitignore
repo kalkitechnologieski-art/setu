@@ -61,3 +61,54 @@ phase2.env.local
 .next/
 
 .turbo/
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Setu Kalki — build & script artifacts (never commit)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Script backup directories
+.master-backups/
+.phase1-backups/
+.phase2-backups/
+.phase3-backups/
+.phase4-backups/
+.hotfix-backups/
+.type-fix-backups/
+.deploy-backups/
+.fix-backups/
+.polish-backups/
+.cleanup-backups/
+
+# Script log directories
+.master-logs/
+.phase1-logs/
+.phase2-logs/
+.phase3-logs/
+.phase4-logs/
+.deploy-logs/
+.fix-logs/
+.polish-logs/
+.cleanup-logs/
+
+# Script state files
+.master.lock
+.phase1.lock
+.phase2.lock
+.phase3.lock
+.phase4.lock
+.setup.lock
+.phase2-continue.lock
+
+# Script state JSON
+.phase1-state.json
+.phase2-state.json
+.phase3-state.json
+.phase4-state.json
+.phase1-fix-state.json
+.phase2-fix-state.json
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+.tables-patch.ts

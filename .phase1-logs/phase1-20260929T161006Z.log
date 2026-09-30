@@ -1,1 +1,0 @@
-lib/notifications/queries.ts(5,8): error TS2305: Module '"./types"' has no exported member 'NotificationAggregate'.
