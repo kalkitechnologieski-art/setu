@@ -11,7 +11,6 @@ import {
   Users,
   Wallet,
   type LucideIcon,
-  Network,
 } from "lucide-react";
 
 export interface NavItem {

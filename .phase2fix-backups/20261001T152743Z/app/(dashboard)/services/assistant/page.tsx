@@ -1,0 +1,69 @@
+
+import { redirect } from "next/navigation";
+import { Sparkles, MessageSquare, Zap, Target } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { bootstrapServices, getServiceBus } from "@/lib/services/registry";
+import { ServiceHeader } from "@/components/services/service-header";
+import { DependencyStrip } from "@/components/services/dependency-strip";
+import { ServiceKPIRow } from "@/components/services/service-kpi-row";
+import { WorkflowList } from "@/components/services/workflow-list";
+import { WidgetBoundary } from "@/components/shared/widget-boundary";
+
+export const dynamic = "force-dynamic";
+
+const OUTGOING = ["leads", "email", "calling", "performance"];
+const INCOMING: string[] = [];
+
+export default async function AssistantServicePage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login?next=/services/assistant");
+
+  bootstrapServices();
+  const bus = getServiceBus();
+  const health = await bus.healthAll();
+  const svc = health.find((h) => h.id === "assistant");
+  if (!svc) redirect("/services");
+
+  const outgoing = health.filter((h) => OUTGOING.includes(h.id));
+  const incoming = health.filter((h) => INCOMING.includes(h.id));
+
+  const { count: msgCount } = await supabase
+    .from("siddhi_messages")
+    .select("id", { count: "exact", head: true });
+
+  const { count: briefCount } = await supabase
+    .from("briefings")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+
+  const kpis = [
+    { label: "Messages", value: msgCount ?? 0, icon: MessageSquare, accent: "violet" as const },
+    { label: "Briefings", value: briefCount ?? 0, icon: Sparkles, accent: "emerald" as const },
+    { label: "Providers", value: svc.providers.length, icon: Zap, accent: "amber" as const },
+    { label: "Consumers", value: incoming.length, icon: Target, accent: "blue" as const },
+  ];
+
+  return (
+    <div className="space-y-6 animate-fade-up">
+      <ServiceHeader
+        service={svc}
+        icon={Sparkles}
+        title="Siddhi Assistant"
+        role="Orchestration layer"
+        description="Coordinates all four AI employees. Falls back gracefully across Groq, Gemini, OpenRouter, and Modal when providers fail."
+        accentClass="from-violet-500 to-blue-500"
+      />
+
+      <WidgetBoundary label="Dependencies">
+        <DependencyStrip current={svc} incoming={incoming} outgoing={outgoing} />
+      </WidgetBoundary>
+
+      <ServiceKPIRow kpis={kpis} />
+
+      <WidgetBoundary label="Workflows">
+        <WorkflowList userId={user.id} serviceId="assistant" />
+      </WidgetBoundary>
+    </div>
+  );
+}
